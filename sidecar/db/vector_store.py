@@ -19,16 +19,19 @@ class VectorStore:
         self.db = None
         self.table = None
         self.model = None
+        # Default local path for production offline use
+        self.local_model_path = str(base_dir / "models" / "nomic-embed-text-v1.5")
         self.model_name = "nomic-ai/nomic-embed-text-v1.5"
         
         logger.info(f"VectorStore initialized with path: {self.db_path}")
 
     def _get_model(self):
         if self.model is None:
-            logger.info(f"Loading embedding model: {self.model_name}...")
-            # nomic-embed-text-v1.5 requires trust_remote_code=True for some environments, 
-            # but sentence-transformers usually handles it.
-            self.model = SentenceTransformer(self.model_name, trust_remote_code=True)
+            # Check if local model exists for offline use
+            load_path = self.local_model_path if os.path.exists(self.local_model_path) else self.model_name
+            logger.info(f"Loading embedding model from: {load_path}...")
+            
+            self.model = SentenceTransformer(load_path, trust_remote_code=True)
             logger.info("Embedding model loaded")
         return self.model
 

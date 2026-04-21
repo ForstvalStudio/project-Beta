@@ -12,3 +12,5 @@ pytest
 passlib[bcrypt]
 python-jose[cryptography]
 python-multipart
+llama-cpp-python>=0.2.75
+huggingface-hub>=0.22.0

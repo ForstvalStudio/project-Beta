@@ -1,0 +1,24 @@
+# Project Beta Git Ignore
+
+# AI Models (Production Assets)
+sidecar/models/*.gguf
+sidecar/models/nomic-embed-text-v1.5/
+
+# Databases
+sidecar/db/tracker.sqlite
+sidecar/lancedb/
+
+# Python
+sidecar/__pycache__/
+sidecar/.pytest_cache/
+sidecar/venv/
+sidecar/*.log
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# OS
+.DS_Store
+Thumbs.db

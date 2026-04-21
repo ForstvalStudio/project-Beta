@@ -5,7 +5,7 @@ import os
 import sys
 from typing import Dict, List
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
@@ -16,7 +16,7 @@ from logic.mapping_manager import mapping_manager
 from logic.excel_engine import excel_engine
 
 # Routers
-from routers import auth_router, asset_router, maintenance_router, forecast_router
+from routers import auth_router, asset_router, maintenance_router, forecast_router, stats_router
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -61,10 +61,14 @@ app.add_middleware(
 )
 
 # Register Routers
-app.include_router(auth_router.router)
-app.include_router(asset_router.router)
-app.include_router(maintenance_router.router)
-app.include_router(forecast_router.router)
+api_v1 = APIRouter(prefix="/api/v1")
+api_v1.include_router(auth_router.router)
+api_v1.include_router(asset_router.router)
+api_v1.include_router(maintenance_router.router)
+api_v1.include_router(forecast_router.router)
+api_v1.include_router(stats_router.router)
+
+app.include_router(api_v1)
 
 class ConnectionManager:
     def __init__(self):

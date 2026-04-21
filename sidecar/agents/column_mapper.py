@@ -3,6 +3,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 import instructor
 from llama_cpp import Llama
+from db.manager import db_manager
 from db.vector_store import vector_store
 
 logger = logging.getLogger("sidecar.agents.column_mapper")
@@ -87,6 +88,14 @@ class ColumnMapper:
             model="phi-3.5-mini",
             messages=[{"role": "user", "content": prompt}],
             response_model=ColumnMapperResponse,
+        )
+
+        # 4. Audit Log (AGT-01 Spec)
+        db_manager.log_agent_action(
+            agent_id="AGT-01",
+            action_type="bulk_mapping",
+            input_data={"headers": workbook_headers},
+            output_data=response.dict()
         )
 
         return response
