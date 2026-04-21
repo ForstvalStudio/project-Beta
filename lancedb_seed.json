@@ -1,0 +1,50 @@
+[
+  {
+    "ui_field": "ba_number",
+    "description": "Unique identifier for the equipment (BA Number)",
+    "data_type": "string",
+    "valid_range": "Non-empty alphanumeric"
+  },
+  {
+    "ui_field": "name",
+    "description": "Human-readable name or model of the asset",
+    "data_type": "string",
+    "valid_range": "N/A"
+  },
+  {
+    "ui_field": "date_of_commission",
+    "description": "Date when the equipment was first put into service",
+    "data_type": "date",
+    "valid_range": "Past or present date (YYYY-MM-DD)"
+  },
+  {
+    "ui_field": "kms",
+    "description": "Current total distance traveled by the equipment in kilometers",
+    "data_type": "float",
+    "valid_range": ">= 0"
+  },
+  {
+    "ui_field": "hrs",
+    "description": "Current total operating hours of the equipment",
+    "data_type": "float",
+    "valid_range": ">= 0"
+  },
+  {
+    "ui_field": "total_capacity",
+    "description": "Maximum fluid capacity (e.g., fuel or oil) for demand forecast",
+    "data_type": "float",
+    "valid_range": "> 0"
+  },
+  {
+    "ui_field": "current_month_kms",
+    "description": "Distance traveled in the current calendar month",
+    "data_type": "float",
+    "valid_range": ">= 0"
+  },
+  {
+    "ui_field": "asset_group",
+    "description": "Category or department the asset belongs to",
+    "data_type": "string",
+    "valid_range": "N/A"
+  }
+]
