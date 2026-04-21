@@ -1,14 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException
-from typing import List, Optional
+from fastapi import APIRouter
+from typing import Optional
 from db.manager import db_manager
-from logic.auth import get_current_user
 from agents.forecast_agent import forecast_agent
 from models.api_models import ForecastResponse
 
 router = APIRouter(prefix="/forecast", tags=["Demand Forecast"])
 
-@router.get("/{fiscal_year}", response_model=ForecastResponse)
-async def get_forecast(fiscal_year: str, asset_group: Optional[str] = None, user: dict = Depends(get_current_user)):
+@router.get("/", response_model=ForecastResponse)
+async def get_forecast(fiscal_year: str, asset_group: Optional[str] = None):
     """
     Computes the annual supply demand for a given Fiscal Year (AGT-03).
     Formula: Demand = ((Total Capacity + 10% Top-up) × Service Frequency per Year) × Asset Quantity × 1.20 Buffer

@@ -1,8 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from typing import List, Dict, Any
 from datetime import datetime
 from db.manager import db_manager
-from logic.auth import get_current_user
 from agents.schedule_engine import schedule_engine
 from agents.status_classifier import status_classifier
 from models.api_models import TaskCompleteRequest, TaskResponse
@@ -10,7 +9,7 @@ from models.api_models import TaskCompleteRequest, TaskResponse
 router = APIRouter(prefix="/maintenance", tags=["Maintenance"])
 
 @router.get("/tasks", response_model=List[TaskResponse])
-async def list_tasks(user: dict = Depends(get_current_user)):
+async def list_tasks():
     """
     Lists all maintenance tasks with real-time status evaluation (AGT-05).
     """
@@ -35,7 +34,7 @@ async def list_tasks(user: dict = Depends(get_current_user)):
     return tasks
 
 @router.post("/tasks/{task_id}/complete", response_model=Dict[str, Any])
-async def complete_task(task_id: str, req: TaskCompleteRequest, user: dict = Depends(get_current_user)):
+async def complete_task(task_id: str, req: TaskCompleteRequest):
     """
     Marks a task as complete and spawns the next task in the chain (AGT-02).
     Enforces the Chain Rule (Zero Schedule Drift).

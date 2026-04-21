@@ -69,12 +69,12 @@ CREATE TABLE IF NOT EXISTS import_sessions (
 -- Table: agent_audit_log
 CREATE TABLE IF NOT EXISTS agent_audit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    agent_id TEXT,
-    action TEXT,
-    status TEXT,
-    user_id INTEGER,
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users (id)
+    agent_id TEXT NOT NULL DEFAULT '',
+    action_type TEXT NOT NULL DEFAULT '',
+    input_hash TEXT,
+    output_preview TEXT,
+    status TEXT DEFAULT 'success',
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Table: confirmed_mappings

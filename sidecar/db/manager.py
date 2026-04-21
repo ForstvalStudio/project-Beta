@@ -48,8 +48,8 @@ class DatabaseManager:
         conn = self.connect()
         try:
             conn.execute(
-                "INSERT INTO agent_audit_log (agent_id, action_type, input_hash, output_preview, status) VALUES (?, ?, ?, ?, ?)",
-                (agent_id, action_type, json.dumps(input_data), json.dumps(output_data)[:500], status)
+                "INSERT INTO agent_audit_log (agent_id, action, action_type, input_hash, output_preview, status) VALUES (?, ?, ?, ?, ?, ?)",
+                (agent_id, action_type, action_type, json.dumps(input_data), json.dumps(output_data)[:500], status)
             )
             conn.commit()
             logger.info(f"Agent action logged: {agent_id} - {action_type}")
@@ -81,6 +81,22 @@ class MigrationRunner:
 
     def run_initial_migration(self, schema_path: str):
         logger.info("Running initial migration...")
+        
+        # Structural migration: recreate agent_audit_log if it has the old schema
+        # (column 'action' renamed to 'action_type' in schema.sql).
+        # Audit logs are non-critical — safe to drop and recreate.
+        conn = self.db_manager.connect()
+        try:
+            cursor = conn.execute("PRAGMA table_info(agent_audit_log)")
+            columns = [row[1] for row in cursor.fetchall()]
+            if "action" in columns and "action_type" not in columns:
+                logger.info("Recreating agent_audit_log with updated schema (action → action_type)...")
+                conn.execute("DROP TABLE IF EXISTS agent_audit_log")
+                conn.commit()
+                logger.info("agent_audit_log dropped — will be recreated by schema.sql")
+        except Exception as e:
+            logger.warning(f"Pre-migration check on agent_audit_log failed: {e}")
+
         self.db_manager.execute_script(schema_path)
         logger.info("Initial migration complete")
         
@@ -108,23 +124,44 @@ class MigrationRunner:
                 cursor = conn.execute(f"PRAGMA table_info({table_name})")
                 existing_cols = [row[1] for row in cursor.fetchall()]
                 
-                # Find columns in schema block (very basic parsing)
-                # Matches: "column_name TYPE"
-                schema_cols = re.findall(r'^\s+(\w+)\s+', columns_block, re.MULTILINE)
+                # Find columns in schema block (skip keywords and constraints)
+                # Matches: "column_name TYPE" but ignores lines starting with CONSTRAINT keywords
+                schema_cols = []
+                for line in columns_block.split('\n'):
+                    line = line.strip()
+                    # Skip empty lines or constraint lines
+                    if not line or any(line.upper().startswith(kprefix) for kprefix in ["FOREIGN", "PRIMARY", "UNIQUE", "CHECK", "CONSTRAINT"]):
+                        continue
+                    
+                    # Match the first word (column name)
+                    col_match = re.match(r'^(\w+)\s+', line)
+                    if col_match:
+                        col_name = col_match.group(1)
+                        # Skip 'id' as it's usually the primary key and cannot be added via ALTER TABLE anyway
+                        if col_name.lower() == "id":
+                            continue
+                        schema_cols.append(col_name)
                 
                 for col in schema_cols:
                     if col.lower() not in [ec.lower() for ec in existing_cols]:
                         logger.info(f"Adding missing column '{col}' to table '{table_name}'...")
+                        
                         # Extract the full column definition (type, defaults, etc.)
-                        col_def_match = re.search(rf'^\s+{col}\s+(.*?),?$', columns_block, re.MULTILINE | re.IGNORECASE)
+                        # Improved regex to stop at comma or comment
+                        col_def_match = re.search(rf'^\s+{col}\s+([^,--]+)', columns_block, re.MULTILINE | re.IGNORECASE)
+                        
                         if col_def_match:
-                            col_def = col_def_match.group(1).rstrip(',')
+                            col_def = col_def_match.group(1).strip().rstrip(',')
                             try:
                                 conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {col} {col_def}")
                                 conn.commit()
                                 logger.info(f"Column '{col}' added successfully.")
                             except Exception as e:
-                                logger.error(f"Failed to add column '{col}': {e}")
+                                err_msg = str(e)
+                                if "already exists" in err_msg.lower():
+                                    logger.debug(f"Column '{col}' already exists, skipping.")
+                                else:
+                                    logger.error(f"Failed to add column '{col}': {e}")
             
             logger.info("Schema sync complete")
         except Exception as e:

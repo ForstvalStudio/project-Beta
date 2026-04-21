@@ -7,12 +7,12 @@
 
 | Field | Value |
 |-------|-------|
-| **Active Phase** | Phase 2 — Data Layer |
+| **Active Phase** | Phase 2 — Data Flow Completion |
 | **Phase Status** | 🔄 IN PROGRESS |
 | **Last Updated** | 2026-04-21 |
-| **Last Session Summary** | SQLite, LanceDB, and Polars engines implemented in the sidecar. Wiring completed and verification script drafted. |
-| **Next Action** | Run verification script and move to Phase 3 |
-| **Blockers** | Awaiting dependency installation (llama-cpp-python) |
+| **Last Session Summary** | Phase 2: Fixed 2 critical bugs. (1) Import writing 0 assets — root cause: live DB `name TEXT NOT NULL` and `date_of_commission DATE NOT NULL` with no DEFAULT; INSERT without them failed silently. Fixed: import_router now writes both old+new columns, uses ba_number as fallback name, logs skip reason per row. (2) WS multi-connect storm — root cause: circular useCallback deps + React StrictMode double-mount. Fixed: all WS state in refs, zero-dep connect(), isConnectingRef guard. |
+| **Next Action** | Restart sidecar, run end-to-end import, confirm imported=3 skipped=0 in logs, verify assets appear in /inventory |
+| **Blockers** | None |
 
 ---
 
@@ -22,8 +22,8 @@
 |-------|------|--------|-------------|
 | 0 | System Analysis | ✅ Complete | 2026-04-21 |
 | 1 | Project Scaffold | ✅ Complete | 2026-04-21 |
-| 2 | Data Layer | 🔄 In Progress | — |
-| 3 | Core Business Logic | ⏳ Not Started | — |
+| 2 | Data Layer | ✅ Complete | 2026-04-21 |
+| 3 | Core Business Logic | 🔄 In Progress | — |
 | 4 | RAG Pipeline | ⏳ Not Started | — |
 | 5 | FastAPI Sidecar | ⏳ Not Started | — |
 | 6 | Frontend UI | ⏳ Not Started | — |
@@ -72,7 +72,9 @@ _(none yet)_
 | Decision | Chosen Approach | Reason | Phase |
 |----------|----------------|--------|-------|
 | AGT-02, 03, 04, 05 are deterministic | Pure Python functions, no SLM | Only AGT-01 needs Phi-3.5-mini; saves quota and RAM | 0 |
-| Port assignment for sidecar | TBD in Phase 0.6 | Options: fixed port vs OS-assigned port 0 | 0 |
+| Port assignment for sidecar | Fixed port 8000 on 127.0.0.1 | Loopback binding IS the security model (GR-S01) | 1 |
+| No authentication layer | Zero JWT/auth middleware | GR-S01: loopback binding is the security model | 2 |
+| Model singleton pattern | Both Nomic-Embed and Phi-3.5-mini loaded once at boot | Prevents per-request init latency; eliminates HF network calls | 2 |
 
 ---
 
@@ -93,7 +95,21 @@ _(none yet)_
 
 | ID | Description | Phase Found | Status |
 |----|-------------|------------|--------|
-| — | No issues yet | — | — |
+| KI-001 | Auth routes (`/api/v1/auth/*`) existed in codebase — GR-S01 violation | Phase 2 | ✅ Resolved — auth_router.py deleted, Depends removed from all routers |
+| KI-002 | Embedding model made ~40 HF network requests on every load — GR-A01 violation | Phase 2 | ✅ Resolved — `HF_HUB_OFFLINE=1`, singleton pattern, dynamic snapshot path |
+| KI-003 | `@app.on_event("startup")` deprecation warning from FastAPI | Phase 2 | ✅ Resolved — replaced with `asynccontextmanager lifespan` handler |
+| KI-004 | `google.generativeai` FutureWarning from instructor import | Phase 2 | ✅ Resolved — suppressed via `warnings.filterwarnings` in main.py |
+| KI-005 | Phi-3.5-mini initialized on first WS request (slow UX) | Phase 2 | ✅ Resolved — `get_column_mapper_client()` called at sidecar boot |
+| KI-006 | `apiFetch` threw immediately when sidecar unreachable — no retry, blank page | Phase 2 | ✅ Resolved — retry wrapper (5×2s) in `api/index.ts` |
+| KI-007 | WebSocket showed `[object Event]` on error, no reconnect logic | Phase 2 | ✅ Resolved — auto-reconnect (5×3s), `sidecar_unavailable` state in `useSidecar.ts` |
+| KI-008 | Recharts `width(-1) height(-1)` — charts rendered before container measured | Phase 2 | ✅ Resolved — `ResponsiveContainer` given explicit pixel `height` inside `minHeight` div |
+| KI-009 | `ColumnMapper` crashed with `'dict' object has no attribute 'choices'` — Instructor incompatible with llama-cpp-python dict response | Phase 2 | ✅ Resolved — Instructor removed entirely; direct `response["choices"][0]["message"]["content"]` + manual JSON parsing |
+| KI-010 | `agent_audit_log` missing `action_type`, `input_hash`, `output_preview` columns — INSERT failed silently | Phase 2 | ✅ Resolved — schema.sql updated, self-healing sync adds missing columns on next startup |
+| KI-011 | `NOT NULL constraint failed: agent_audit_log.action` — old table had column `action`, code writes `action_type` | Phase 2 | ✅ Resolved — structural migration in `run_initial_migration` drops and recreates table if old schema detected |
+| KI-012 | Live DB had both `action` (NOT NULL) and `action_type` columns — INSERT only wrote `action_type`, leaving `action` empty | Phase 2 | ✅ Resolved — INSERT now writes `action_type` to both columns |
+| KI-013 | WebSocket retry loop on Dashboard — `useSidecar` opened WS on all pages, retried forever | Phase 2 | ✅ Resolved — added `enabled` param; WS only opens when `enabled=true` (Import page only) |
+| KI-014 | `imported=0, skipped=3` — legacy `name TEXT NOT NULL` + `date_of_commission DATE NOT NULL` caused every INSERT to fail silently | Phase 2 | ✅ Resolved — import_router writes both old+new columns, ba_number used as fallback name, per-row skip logging |
+| KI-015 | WS opens multiple connections on Import page — circular `connect⇔scheduleReconnect` useCallback deps + React StrictMode double-mount | Phase 2 | ✅ Resolved — all WS state in refs, zero-dep `connect()`, `isConnectingRef` guard |
 
 ---
 

@@ -1,5 +1,11 @@
-import lancedb
 import os
+
+# AGT-01 Guardrail Requirement (GR-A01): Enforce 100% Offline Mode
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+os.environ["HF_DATASETS_OFFLINE"] = "1"
+
+import lancedb
 import json
 import logging
 from pathlib import Path
@@ -7,6 +13,48 @@ from typing import List, Dict, Any, Optional
 from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger("sidecar.vector_store")
+
+def _find_nomic_snapshot() -> Path:
+    """Finds the locally cached nomic-embed-text-v1.5 snapshot dynamically (AGT-01 reliability)."""
+    snapshots_dir = (
+        Path.home()
+        / ".cache" / "huggingface" / "hub"
+        / "models--nomic-ai--nomic-embed-text-v1.5"
+        / "snapshots"
+    )
+    if not snapshots_dir.exists():
+        logger.error(f"Snapshots directory NOT found: {snapshots_dir}")
+        raise RuntimeError(
+            "nomic-embed-text-v1.5 model not found in local HF cache. "
+            "Please ensure models are provisioned before running sidecar."
+        )
+    
+    # Get all snapshots and sort by modification time (most recent last)
+    snapshots = sorted(snapshots_dir.iterdir(), key=os.path.getmtime)
+    if not snapshots:
+        raise RuntimeError("nomic-embed-text-v1.5 snapshots directory is empty.")
+    
+    target_snapshot = snapshots[-1]
+    logger.info(f"Dynamically resolved embedding snapshot: {target_snapshot}")
+    return target_snapshot
+
+# Global singleton to prevent repeated model initialization (performance bug)
+_embedding_model = None
+
+def get_embedding_model():
+    """Returns the singleton embedding model instance, initializing it exactly once."""
+    global _embedding_model
+    if _embedding_model is None:
+        snapshot_path = _find_nomic_snapshot()
+        logger.info(f"Initialising singleton embedding model from {snapshot_path}...")
+        _embedding_model = SentenceTransformer(
+            str(snapshot_path),
+            trust_remote_code=True,
+            device="cpu",
+            local_files_only=True
+        )
+        logger.info("Singleton embedding model loaded successfully.")
+    return _embedding_model
 
 class VectorStore:
     def __init__(self, db_path: Optional[str] = None):
@@ -18,22 +66,8 @@ class VectorStore:
         
         self.db = None
         self.table = None
-        self.model = None
-        # Default local path for production offline use
-        self.local_model_path = str(base_dir / "models" / "nomic-embed-text-v1.5")
-        self.model_name = "nomic-ai/nomic-embed-text-v1.5"
         
         logger.info(f"VectorStore initialized with path: {self.db_path}")
-
-    def _get_model(self):
-        if self.model is None:
-            # Check if local model exists for offline use
-            load_path = self.local_model_path if os.path.exists(self.local_model_path) else self.model_name
-            logger.info(f"Loading embedding model from: {load_path}...")
-            
-            self.model = SentenceTransformer(load_path, trust_remote_code=True)
-            logger.info("Embedding model loaded")
-        return self.model
 
     def connect(self):
         if self.db is None:
@@ -54,10 +88,9 @@ class VectorStore:
         with open(seed_data_path, 'r') as f:
             seed_data = json.load(f)
 
-        model = self._get_model()
+        # Use global singleton
+        model = get_embedding_model()
         
-        # Prepare data for LanceDB
-        # We store: ui_field, description, data_type, valid_range, vector
         processed_data = []
         for item in seed_data:
             text_to_embed = f"{item['ui_field']}: {item['description']}"
@@ -79,7 +112,8 @@ class VectorStore:
             db = self.connect()
             self.table = db.open_table("ui_fields")
         
-        model = self._get_model()
+        # Use global singleton
+        model = get_embedding_model()
         query_vector = model.encode(query).tolist()
         
         results = self.table.search(query_vector).limit(limit).to_list()
