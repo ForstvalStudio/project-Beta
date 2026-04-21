@@ -1,50 +1,290 @@
 [
   {
     "ui_field": "ba_number",
-    "description": "Unique identifier for the equipment (BA Number)",
+    "description": "Unique identifier for the equipment (BA Number, VEH BA NO, BA NO)",
     "data_type": "string",
     "valid_range": "Non-empty alphanumeric"
   },
   {
-    "ui_field": "name",
-    "description": "Human-readable name or model of the asset",
+    "ui_field": "asset_name",
+    "description": "Human-readable name or model of the asset (MAKE & TYPE, MAKE TYPE)",
     "data_type": "string",
     "valid_range": "N/A"
   },
   {
     "ui_field": "date_of_commission",
-    "description": "Date when the equipment was first put into service",
+    "description": "Date when the equipment was first put into service (DATE OF REL, DT OF COMM)",
     "data_type": "date",
     "valid_range": "Past or present date (YYYY-MM-DD)"
   },
   {
-    "ui_field": "kms",
-    "description": "Current total distance traveled by the equipment in kilometers",
+    "ui_field": "kms_road",
+    "description": "Current total distance traveled by the equipment in kilometers (KM RUN, KM RUN TOTAL)",
     "data_type": "float",
     "valid_range": ">= 0"
   },
   {
-    "ui_field": "hrs",
-    "description": "Current total operating hours of the equipment",
+    "ui_field": "kms_towing",
+    "description": "Distance traveled while towing in kilometers (KM TOW, TOWING KM)",
     "data_type": "float",
     "valid_range": ">= 0"
   },
   {
-    "ui_field": "total_capacity",
-    "description": "Maximum fluid capacity (e.g., fuel or oil) for demand forecast",
+    "ui_field": "kms_previous_month",
+    "description": "Distance traveled in the previous calendar month (KM RUN PREVIOUS MONTH, PREV MONTH KM)",
+    "data_type": "float",
+    "valid_range": ">= 0"
+  },
+  {
+    "ui_field": "kms_current_month",
+    "description": "Distance traveled in the current calendar month (KM RUN CURRENT MONTH, CURR MONTH KM)",
+    "data_type": "float",
+    "valid_range": ">= 0"
+  },
+  {
+    "ui_field": "hrs_run",
+    "description": "Current total operating hours of the equipment (HRS RUN, HR RUN, HOURS RUN)",
+    "data_type": "float",
+    "valid_range": ">= 0"
+  },
+  {
+    "ui_field": "fuel_rate",
+    "description": "Fuel consumption rate in km per litre or litres per hour",
     "data_type": "float",
     "valid_range": "> 0"
   },
   {
-    "ui_field": "current_month_kms",
-    "description": "Distance traveled in the current calendar month",
+    "ui_field": "serial_number",
+    "description": "Serial number or chassis number of the equipment",
+    "data_type": "string",
+    "valid_range": "N/A"
+  },
+  {
+    "ui_field": "asset_group",
+    "description": "Category or department the asset belongs to (from sheet name or group column)",
+    "data_type": "string",
+    "valid_range": "N/A"
+  },
+  {
+    "ui_field": "tm1_done",
+    "description": "Date when TM-I (Technical Maintenance I) was last performed (TM - I DONE, TM-I DONE)",
+    "data_type": "date",
+    "valid_range": "YYYY-MM-DD"
+  },
+  {
+    "ui_field": "tm1_due",
+    "description": "Date when TM-I (Technical Maintenance I) is due (TM - I DUE, TM-I DUE)",
+    "data_type": "date",
+    "valid_range": "YYYY-MM-DD"
+  },
+  {
+    "ui_field": "tm2_done",
+    "description": "Date when TM-II (Technical Maintenance II) was last performed (TM - II DONE, TM-II DONE)",
+    "data_type": "date",
+    "valid_range": "YYYY-MM-DD"
+  },
+  {
+    "ui_field": "tm2_due",
+    "description": "Date when TM-II (Technical Maintenance II) is due (TM - II DUE, TM-II DUE)",
+    "data_type": "date",
+    "valid_range": "YYYY-MM-DD"
+  },
+  {
+    "ui_field": "oh1_done",
+    "description": "Date when Overhaul I was completed (OH-I DONE, OH-I Done, BOH DONE)",
+    "data_type": "date",
+    "valid_range": "YYYY-MM-DD"
+  },
+  {
+    "ui_field": "oh1_due",
+    "description": "Date when Overhaul I is due (OH-I DUE, OH-I Due, BOH DUE)",
+    "data_type": "date",
+    "valid_range": "YYYY-MM-DD"
+  },
+  {
+    "ui_field": "oh2_done",
+    "description": "Date when Overhaul II was completed (OH-II DONE, OH-II Done)",
+    "data_type": "date",
+    "valid_range": "YYYY-MM-DD"
+  },
+  {
+    "ui_field": "oh2_due",
+    "description": "Date when Overhaul II is due (OH-II DUE, OH-II Due)",
+    "data_type": "date",
+    "valid_range": "YYYY-MM-DD"
+  },
+  {
+    "ui_field": "service_life_vintage",
+    "description": "Service life in years since commissioning (VINTAGE YEARS, LIFE VINTAGE)",
     "data_type": "float",
     "valid_range": ">= 0"
   },
   {
-    "ui_field": "asset_group",
-    "description": "Category or department the asset belongs to",
+    "ui_field": "discard_vintage_years",
+    "description": "Years limit for asset discard (DISCARD CRITERIA VINTAGE YEARS)",
+    "data_type": "float",
+    "valid_range": ">= 0"
+  },
+  {
+    "ui_field": "discard_kms_limit",
+    "description": "Kilometer limit for asset discard (DISCARD CRITERIA METERAGE KMS)",
+    "data_type": "float",
+    "valid_range": ">= 0"
+  },
+  {
+    "ui_field": "fluid_capacity",
+    "description": "Fluid capacity in litres or kg (CAPACITY LTRS/KG, CAPACITY, LTR)",
+    "data_type": "float",
+    "valid_range": "> 0"
+  },
+  {
+    "ui_field": "fluid_top_up",
+    "description": "Additional 10% top-up quantity for fluid (ADDL 10% TOP UP, TOP UP)",
+    "data_type": "float",
+    "valid_range": ">= 0"
+  },
+  {
+    "ui_field": "fluid_grade",
+    "description": "Grade or specification of fluid (GRADE, FLUID GRADE, OIL GRADE)",
     "data_type": "string",
     "valid_range": "N/A"
+  },
+  {
+    "ui_field": "fluid_last_change",
+    "description": "Date of last fluid change (DT OF CHANGE, LAST CHANGE, DATE CHANGE)",
+    "data_type": "date",
+    "valid_range": "YYYY-MM-DD"
+  },
+  {
+    "ui_field": "fluid_periodicity",
+    "description": "Service interval or periodicity for fluid change (PERIODICITY, INTERVAL)",
+    "data_type": "string",
+    "valid_range": "N/A"
+  },
+  {
+    "ui_field": "battery_last_change",
+    "description": "Date of last battery change (BTY DT OF CHANGE, BATTERY CHANGE DATE)",
+    "data_type": "date",
+    "valid_range": "YYYY-MM-DD"
+  },
+  {
+    "ui_field": "battery_life",
+    "description": "Battery life in months or years (BTY LIFE, BATTERY LIFE)",
+    "data_type": "string",
+    "valid_range": "N/A"
+  },
+  {
+    "ui_field": "tyre_rotation",
+    "description": "Tyre rotation information or mileage",
+    "data_type": "string",
+    "valid_range": "N/A"
+  },
+  {
+    "ui_field": "tyre_condition",
+    "description": "Tyre condition status or rating",
+    "data_type": "string",
+    "valid_range": "N/A"
+  },
+  {
+    "ui_field": "tyre_mileage",
+    "description": "Tyre mileage or distance covered on tyres",
+    "data_type": "float",
+    "valid_range": ">= 0"
+  },
+  {
+    "ui_field": "ser_no",
+    "description": "Serial number row identifier to be ignored (SER NO, SNO, SERIAL NO)",
+    "data_type": "ignore",
+    "valid_range": "N/A"
+  },
+  {
+    "ui_field": "remarks",
+    "description": "Remarks or notes column to be ignored (REMARKS, NOTES, COMMENTS)",
+    "data_type": "ignore",
+    "valid_range": "N/A"
+  },
+  {
+    "ui_field": "eng_oil",
+    "description": "Engine oil fluid type - ENG OIL, ENGINE OIL, CRANKCASE OIL",
+    "data_type": "fluid_type",
+    "valid_range": "ENG_OIL"
+  },
+  {
+    "ui_field": "txn_oil",
+    "description": "Transmission oil fluid type - TXN OIL, TRANS OIL, GEAR OIL",
+    "data_type": "fluid_type",
+    "valid_range": "TXN_OIL"
+  },
+  {
+    "ui_field": "hyd_oil",
+    "description": "Hydraulic oil fluid type - HYD OIL, HYD OIL 570, HYDRAULIC",
+    "data_type": "fluid_type",
+    "valid_range": "HYD_OIL"
+  },
+  {
+    "ui_field": "coolant",
+    "description": "Coolant fluid type - COOLANT, RAD COOLANT, RADIATOR FLUID",
+    "data_type": "fluid_type",
+    "valid_range": "COOLANT"
+  },
+  {
+    "ui_field": "grease",
+    "description": "Grease fluid type - GREASE, LUBRICANT GREASE",
+    "data_type": "fluid_type",
+    "valid_range": "GREASE"
+  },
+  {
+    "ui_field": "differential_oil",
+    "description": "Differential oil fluid type - DIFFERENTIAL, DIFF OIL",
+    "data_type": "fluid_type",
+    "valid_range": "DIFFERENTIAL"
+  },
+  {
+    "ui_field": "hub_oil",
+    "description": "Hub oil fluid type - HUB OIL, WHEEL HUB OIL",
+    "data_type": "fluid_type",
+    "valid_range": "HUB_OIL"
+  },
+  {
+    "ui_field": "clutch_oil",
+    "description": "Clutch oil fluid type - CLUTCH, CLUTCH OIL",
+    "data_type": "fluid_type",
+    "valid_range": "CLUTCH"
+  },
+  {
+    "ui_field": "steering_oil",
+    "description": "Steering oil fluid type - STEERING OIL, POWER STEERING",
+    "data_type": "fluid_type",
+    "valid_range": "STEERING_OIL"
+  },
+  {
+    "ui_field": "brake_clutch_oil",
+    "description": "Brake clutch oil fluid type - BRAKE CLUTCH, BRAKE OIL",
+    "data_type": "fluid_type",
+    "valid_range": "BRAKE_CLUTCH"
+  },
+  {
+    "ui_field": "front_axle_oil",
+    "description": "Front axle oil fluid type - FRONT AXLE, FRONT AXLE OIL",
+    "data_type": "fluid_type",
+    "valid_range": "FRONT_AXLE"
+  },
+  {
+    "ui_field": "gear_box_oil",
+    "description": "Gear box oil fluid type - GEAR BOX, GEAR OIL BOX, GEARBOX",
+    "data_type": "fluid_type",
+    "valid_range": "GEAR_BOX"
+  },
+  {
+    "ui_field": "transmission_sys_oil",
+    "description": "Transmission system oil - TRANSMISSION SYS, TRANS SYS",
+    "data_type": "fluid_type",
+    "valid_range": "TRANSMISSION_SYS"
+  },
+  {
+    "ui_field": "hydraulic_oil",
+    "description": "Hydraulic oil for heavy equipment - HYDRAULIC OIL, HYD SYSTEM",
+    "data_type": "fluid_type",
+    "valid_range": "HYDRAULIC_OIL"
   }
 ]

@@ -15,7 +15,20 @@ from sentence_transformers import SentenceTransformer
 logger = logging.getLogger("sidecar.vector_store")
 
 def _find_nomic_snapshot() -> Path:
-    """Finds the locally cached nomic-embed-text-v1.5 snapshot dynamically (AGT-01 reliability)."""
+    """
+    Finds nomic-embed-text-v1.5 snapshot. Priority:
+    1. TAURI_RESOURCE_DIR/resources/embeddings/nomic-embed-text-v1.5 (production)
+    2. ~/.cache/huggingface/hub/... (dev HF cache)
+    """
+    # Production: model bundled in Tauri resources
+    tauri_res = os.environ.get("TAURI_RESOURCE_DIR")
+    if tauri_res:
+        bundled = Path(tauri_res) / "resources" / "embeddings" / "nomic-embed-text-v1.5"
+        if bundled.exists():
+            logger.info(f"Using bundled nomic model: {bundled}")
+            return bundled
+
+    # Dev: dynamic HF cache lookup
     snapshots_dir = (
         Path.home()
         / ".cache" / "huggingface" / "hub"
@@ -28,12 +41,11 @@ def _find_nomic_snapshot() -> Path:
             "nomic-embed-text-v1.5 model not found in local HF cache. "
             "Please ensure models are provisioned before running sidecar."
         )
-    
-    # Get all snapshots and sort by modification time (most recent last)
+
     snapshots = sorted(snapshots_dir.iterdir(), key=os.path.getmtime)
     if not snapshots:
         raise RuntimeError("nomic-embed-text-v1.5 snapshots directory is empty.")
-    
+
     target_snapshot = snapshots[-1]
     logger.info(f"Dynamically resolved embedding snapshot: {target_snapshot}")
     return target_snapshot

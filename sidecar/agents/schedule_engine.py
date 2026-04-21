@@ -1,88 +1,147 @@
+"""
+AGT-02 — ScheduleEngine
+Deterministic scheduling agent. Enforces the Chain Rule.
+next_due_date = previous_baseline_date + task_interval_days
+NEVER uses actual_completion_date — that causes Schedule Drift.
+"""
 import logging
-from datetime import datetime, timedelta
+import uuid
+from datetime import date, datetime, timedelta
 from typing import Dict, Any
 
 logger = logging.getLogger("sidecar.agents.schedule_engine")
 
+
 class ScheduleEngine:
     """
-    AGT-02 — ScheduleEngine
-    Identity: Deterministic scheduling agent.
-    Role: Calculates the next maintenance task in the chain (The Chain Rule).
+    AGT-02 — Chain Rule implementation.
+    next_due_date      = previous_baseline_date + task_interval_days
+    next_baseline_date = previous_baseline_date  (NOT completion date)
     """
 
-    def calculate_next_task(self, 
-                            task_type: str,
-                            previous_baseline_date: str, 
-                            task_interval_days: int) -> Dict[str, Any]:
+    def spawn_next_task(
+        self,
+        conn,
+        ba_number: str,
+        task_type: str,
+        task_description: str,
+        previous_baseline_date_str: str,
+        task_interval_days: int,
+    ) -> Dict[str, Any]:
         """
-        Applies The Chain Rule to determine the next task's due date and baseline.
-        
-        Rules:
-        1. next_due_date = previous_baseline_date + task_interval_days
-        2. next_baseline_start_date = previous_baseline_date
-        3. NEVER use actual_completion_date to calculate next_due_date (prevents Schedule Drift)
+        Spawns the next task in the chain. Writes to SQLite immediately.
+
+        Chain Rule (GR-B02 / AGT-02):
+          next_baseline_start_date = previous_baseline_date
+          next_due_date            = previous_baseline_date + interval
+
+        Returns the new task dict.
         """
-        logger.info(f"Calculating next {task_type} task from baseline {previous_baseline_date}")
-        
         try:
-            baseline_dt = datetime.strptime(previous_baseline_date, "%Y-%m-%d")
-        except ValueError:
-            # Fallback for ISO format if needed
-            baseline_dt = datetime.fromisoformat(previous_baseline_date.replace("Z", "+00:00"))
+            baseline = datetime.strptime(previous_baseline_date_str[:10], "%Y-%m-%d").date()
+        except (ValueError, TypeError):
+            logger.error(f"Invalid baseline date: {previous_baseline_date_str!r}")
+            raise ValueError(f"Invalid baseline_start_date: {previous_baseline_date_str!r}")
 
-        next_due_dt = baseline_dt + timedelta(days=task_interval_days)
-        
-        # The next task's baseline is the CURRENT task's due date (which was previous_baseline_date + interval)
-        # Wait, let's re-read the SPEC/LOGIC.
-        # LOGIC.md: 
-        # next_due_date = previous_task.baseline_date + task_interval_days  (Wait, this seems wrong in LOGIC.md if it's a chain)
-        # Let's check SPEC.md:
-        # next_due_date = baseline_start_date + task_interval_days
-        # baseline_start_date = The previous task's due date
-        
-        # Re-reading LOGIC.md 2.1:
-        # next_due_date = previous_task.baseline_date + task_interval_days
-        # Wait, if previous_task.baseline_date was X, and interval is Y, next_due_date is X+Y?
-        # That would mean it's the SAME due date as the previous task. That doesn't make sense.
-        
-        # Let's check the Example in LOGIC.md:
-        # Task due: 2024-06-01
-        # Work done on: 2024-06-08
-        # Next due date: 2024-12-01 (baseline + 6 months)
-        
-        # If "baseline" for the task due 2024-06-01 was 2023-12-01 (6 months prior), 
-        # then next_due_date = 2023-12-01 + 6 months + 6 months = 2024-12-01.
-        # OR: next_baseline = previous_due_date. 
-        # And next_due = next_baseline + interval.
-        
-        # Let's follow the formal convention in AGENTS.md:
-        # next_due_date = previous_baseline_date + task_interval_days
-        # next_baseline_start_date = previous_baseline_date
-        
-        # Wait, if I do this twice:
-        # T1: baseline=B, due=B+I
-        # T2: baseline=B, due=B+I (Wait, this is the same)
-        
-        # There's a slight ambiguity in the wording "previous_baseline_date".
-        # Usually, the "baseline" for the NEXT task is the "due date" of the PREVIOUS task.
-        # Let's check LOGIC.md 2.2:
-        # "The new task's baseline_start_date = the old task's due_date"
-        
-        # Okay, that's clear. 
-        # And: next_due_date = next_baseline_start_date + task_interval_days
-        
-        next_baseline_date = baseline_dt + timedelta(days=task_interval_days) # This is the "old task's due date"
-        next_due_date = next_baseline_date + timedelta(days=task_interval_days)
+        next_baseline = baseline                                  # CHAIN RULE
+        next_due_date = baseline + timedelta(days=task_interval_days)  # CHAIN RULE
 
-        result = {
-            "next_baseline_start_date": next_baseline_date.strftime("%Y-%m-%d"),
+        # Classify new task immediately (AGT-05)
+        from agents.status_classifier import status_classifier
+        classification = status_classifier.classify_task(next_due_date.strftime("%Y-%m-%d"))
+        status = classification["status"]
+        status_colour = classification["status_colour"]
+
+        task_id = f"TSK-{ba_number}-{task_type}-{uuid.uuid4().hex[:6].upper()}"
+
+        conn.execute("""
+            INSERT INTO maintenance_tasks (
+                task_id, ba_number, task_type, task_description,
+                task_interval_days, status, status_colour,
+                baseline_start_date, due_date
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            task_id, ba_number, task_type, task_description,
+            task_interval_days, status, status_colour,
+            next_baseline.strftime("%Y-%m-%d"),
+            next_due_date.strftime("%Y-%m-%d"),
+        ))
+        conn.commit()
+
+        logger.info(
+            f"[AGT-02] Spawned {task_id} for {ba_number}: "
+            f"baseline={next_baseline}, due={next_due_date}, status={status}"
+        )
+
+        return {
+            "next_task_id": task_id,
+            "next_baseline_start_date": next_baseline.strftime("%Y-%m-%d"),
             "next_due_date": next_due_date.strftime("%Y-%m-%d"),
-            "status": "Scheduled"
+            "status": status,
+            "status_colour": status_colour,
         }
-        
-        logger.info(f"Next task calculated: Due {result['next_due_date']}")
-        return result
 
-# Global instance
+    def seed_initial_tasks(
+        self, 
+        conn, 
+        ba_number: str, 
+        commission_date_str: str,
+        is_hrs_only: bool = False
+    ):
+        """
+        Seeds the initial maintenance schedule for a newly imported asset.
+        Creates one Scheduled task starting from commission date.
+        Called by import_router after successful INSERT.
+        
+        For HRS-only assets (Gen set, JCB, Dozer, SSL), uses hours-based intervals.
+        """
+        try:
+            baseline = datetime.strptime(commission_date_str[:10], "%Y-%m-%d").date()
+        except (ValueError, TypeError):
+            logger.warning(f"Cannot seed tasks for {ba_number} — invalid date: {commission_date_str!r}")
+            return
+
+        # For HRS-only assets, use hours-based intervals
+        # Days are still stored, but interval is shorter for HRS equipment
+        if is_hrs_only:
+            interval = 90  # 3 months for HRS-only equipment
+            task_type = "Service-HRS"
+            description = f"{task_type} — {interval} day cycle (HRS-based maintenance)"
+        else:
+            interval = 180  # Standard 180-day service interval
+            task_type = "Service"
+            description = f"{task_type} — {interval} day cycle"
+        
+        due_date = baseline + timedelta(days=interval)
+
+        from agents.status_classifier import status_classifier
+        classification = status_classifier.classify_task(due_date.strftime("%Y-%m-%d"))
+
+        task_id = f"TSK-{ba_number}-SVC-INIT"
+
+        # Idempotent: skip if already exists
+        existing = conn.execute(
+            "SELECT task_id FROM maintenance_tasks WHERE task_id = ?", (task_id,)
+        ).fetchone()
+        if existing:
+            return
+
+        conn.execute("""
+            INSERT INTO maintenance_tasks (
+                task_id, ba_number, task_type, task_description,
+                task_interval_days, status, status_colour,
+                baseline_start_date, due_date
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            task_id, ba_number, task_type, description,
+            interval,
+            classification["status"], classification["status_colour"],
+            baseline.strftime("%Y-%m-%d"),
+            due_date.strftime("%Y-%m-%d"),
+        ))
+        conn.commit()
+        logger.info(f"[AGT-02] Seeded initial task {task_id} for {ba_number}, due {due_date} " +
+                   f"(HRS-only={is_hrs_only})")
+
+
 schedule_engine = ScheduleEngine()

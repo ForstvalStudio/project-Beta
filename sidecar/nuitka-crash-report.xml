@@ -1,0 +1,81 @@
+<?xml version='1.0' encoding='utf8'?>
+<nuitka-compilation-report nuitka_version="4.0.8" nuitka_commercial_version="not installed" mode="onefile" completion="error exit message (1)" exit_message="transformers: Making changes to 'transformers.cli.add_new_model_like' that cause SyntaxError 'f-string: valid expression required before '}' (add_new_model_like.py, line 358)'">
+  <performance>
+    <memory_usage name="after_launch" value="43700224" />
+  </performance>
+  <data_composer blob_size="None" />
+  <command_line>
+    <option value="--standalone" />
+    <option value="--onefile" />
+    <option value="--output-dir=..\src-tauri\binaries" />
+    <option value="--output-filename=main-x86_64-pc-windows-msvc.exe" />
+    <option value="--include-package=fastapi" />
+    <option value="--include-package=uvicorn" />
+    <option value="--include-package=uvicorn.protocols" />
+    <option value="--include-package=uvicorn.lifespan" />
+    <option value="--include-package=uvicorn.loops" />
+    <option value="--include-package=starlette" />
+    <option value="--include-package=llama_cpp" />
+    <option value="--include-package=lancedb" />
+    <option value="--include-package=sentence_transformers" />
+    <option value="--include-package=transformers" />
+    <option value="--include-package=polars" />
+    <option value="--include-package=pydantic" />
+    <option value="--include-package=pydantic_core" />
+    <option value="--include-package=openpyxl" />
+    <option value="--include-package=platformdirs" />
+    <option value="--include-package=anyio" />
+    <option value="--include-package=httpx" />
+    <option value="--include-package=multipart" />
+    <option value="--nofollow-import-to=google.generativeai" />
+    <option value="--nofollow-import-to=google.ai" />
+    <option value="--nofollow-import-to=tensorflow" />
+    <option value="--nofollow-import-to=torch" />
+    <option value="--nofollow-import-to=notebook" />
+    <option value="--nofollow-import-to=IPython" />
+    <option value="--assume-yes-for-downloads" />
+    <option value="--windows-console-mode=disable" />
+    <option value="--company-name=ForstvalStudio" />
+    <option value="--product-name=Project Beta Sidecar" />
+    <option value="--file-version=0.1.0.0" />
+    <option value="main.py" />
+  </command_line>
+  <plugins>
+    <plugin name="anti-bloat" user_enabled="no" />
+    <plugin name="data-files" user_enabled="no" />
+    <plugin name="delvewheel" user_enabled="no" />
+    <plugin name="dll-files" user_enabled="no" />
+    <plugin name="eventlet" user_enabled="no" />
+    <plugin name="gevent" user_enabled="no" />
+    <plugin name="gi" user_enabled="no" />
+    <plugin name="glfw" user_enabled="no" />
+    <plugin name="implicit-imports" user_enabled="no" />
+    <plugin name="kivy" user_enabled="no" />
+    <plugin name="matplotlib" user_enabled="no" />
+    <plugin name="multiprocessing" user_enabled="no" />
+    <plugin name="options-nanny" user_enabled="no" />
+    <plugin name="pbr-compat" user_enabled="no" />
+    <plugin name="pkg-resources" user_enabled="no" />
+    <plugin name="playwright" user_enabled="no" />
+    <plugin name="pywebview" user_enabled="no" />
+    <plugin name="spacy" user_enabled="no" />
+    <plugin name="transformers" user_enabled="no" />
+  </plugins>
+  <onefile cache_mode="temporary" unpack_dir="{TEMP}\onefile_{PID}_{TIME}" />
+  <distributions />
+  <python python_exe="${sys.prefix}\python.exe" python_flavor="CPython Official" python_version="3.13.6" os_name="Windows" os_release="11" arch_name="x86_64" filesystem_encoding="utf-8" gil="yes">
+    <search_path>
+      <path value="${cwd}" />
+      <path value="${sys.prefix}\DLLs" />
+      <path value="${sys.prefix}\Lib" />
+      <path value="${sys.prefix}" />
+      <path value="~\AppData\Roaming\Python\Python313\site-packages" />
+      <path value="~\AppData\Roaming\Python\Python313\site-packages\win32" />
+      <path value="~\AppData\Roaming\Python\Python313\site-packages\win32\lib" />
+      <path value="~\AppData\Roaming\Python\Python313\site-packages\Pythonwin" />
+      <path value="${sys.prefix}\Lib\site-packages" />
+      <path value="~\AppData\Roaming\Python\Python313\site-packages\setuptools\_vendor" />
+    </search_path>
+  </python>
+  <output run_filename="~\OneDrive\Desktop\project Beta\src-tauri\binaries\main-x86_64-pc-windows-msvc.exe" />
+</nuitka-compilation-report>

@@ -11,3 +11,5 @@ einops
 pytest
 llama-cpp-python>=0.2.75
 huggingface-hub>=0.22.0
+platformdirs>=4.0.0
+openpyxl>=3.1.0

@@ -7,11 +7,19 @@
 
 | Field | Value |
 |-------|-------|
-| **Active Phase** | Phase 2 — Data Flow Completion |
+| **Active Phase** | Phase 7 — Integration & Distribution |
 | **Phase Status** | 🔄 IN PROGRESS |
-| **Last Updated** | 2026-04-21 |
-| **Last Session Summary** | Phase 2: Fixed 2 critical bugs. (1) Import writing 0 assets — root cause: live DB `name TEXT NOT NULL` and `date_of_commission DATE NOT NULL` with no DEFAULT; INSERT without them failed silently. Fixed: import_router now writes both old+new columns, uses ba_number as fallback name, logs skip reason per row. (2) WS multi-connect storm — root cause: circular useCallback deps + React StrictMode double-mount. Fixed: all WS state in refs, zero-dep connect(), isConnectingRef guard. |
-| **Next Action** | Restart sidecar, run end-to-end import, confirm imported=3 skipped=0 in logs, verify assets appear in /inventory |
+| **Last Updated** | 2026-04-22 |
+| **Last Session Summary** | COMPLETE AI-driven schema discovery pipeline:
+- Updated lancedb_seed.json with 45+ patterns (BA NO, ENG OIL, TM-I DONE, etc.)
+- Added fluid_profiles table to schema.sql
+- Rewrote column_mapper.py with AI schema discovery (6 categories + fluid types)
+- Rewrote excel_engine.py with openpyxl merged header extraction
+- Rewrote import_router.py with dynamic pipeline (no hardcoded FIELD_TO_COLUMNS)
+- Updated lifecycle.py with equipment type rules (MTL 30yr, ALS 9yr, Gen set/JCB/Dozer/SSL 8yr)
+- Updated schedule_engine.py for HRS-only assets (90-day intervals)
+- Ready for testing with 161_f-164_f workbooks |
+| **Next Action** | Test import with production workbooks: 161_f, 162_f, 163_f, 164_f |
 | **Blockers** | None |
 
 ---
@@ -22,12 +30,12 @@
 |-------|------|--------|-------------|
 | 0 | System Analysis | ✅ Complete | 2026-04-21 |
 | 1 | Project Scaffold | ✅ Complete | 2026-04-21 |
-| 2 | Data Layer | ✅ Complete | 2026-04-21 |
-| 3 | Core Business Logic | 🔄 In Progress | — |
-| 4 | RAG Pipeline | ⏳ Not Started | — |
-| 5 | FastAPI Sidecar | ⏳ Not Started | — |
-| 6 | Frontend UI | ⏳ Not Started | — |
-| 7 | Integration & Polish | ⏳ Not Started | — |
+| 2 | Data Flow & Import | ✅ Complete | 2026-04-22 |
+| 3 | Core Business Logic | ✅ Complete | 2026-04-22 |
+| 4 | RAG Pipeline Optimisation | ✅ Complete | 2026-04-22 |
+| 5 | Full API Surface | ✅ Complete | 2026-04-22 |
+| 6 | Frontend UI Wiring | ✅ Complete | 2026-04-22 |
+| 7 | Integration & Distribution | 🔄 In Progress | — |
 
 ---
 
@@ -54,6 +62,7 @@
 | Session Date | Model Used | Task | Quota Impact |
 |-------------|------------|------|-------------|
 | _(first session)_ | — | Project docs created | Minimal |
+| 2026-04-22 | Claude Sonnet 4.6 (Thinking) | AI schema discovery pipeline implementation | High |
 
 ### Model Switches This Session
 _(none yet)_
@@ -75,6 +84,10 @@ _(none yet)_
 | Port assignment for sidecar | Fixed port 8000 on 127.0.0.1 | Loopback binding IS the security model (GR-S01) | 1 |
 | No authentication layer | Zero JWT/auth middleware | GR-S01: loopback binding is the security model | 2 |
 | Model singleton pattern | Both Nomic-Embed and Phi-3.5-mini loaded once at boot | Prevents per-request init latency; eliminates HF network calls | 2 |
+| No hardcoded FIELD_TO_COLUMNS | AI schema discovery at runtime | Column structure varies per workbook; dynamic discovery required | 7 |
+| openpyxl for Excel reading | Replaced Polars with openpyxl | Merged multi-row headers require cell-by-cell parsing | 7 |
+| Equipment type overhaul rules | Asset group determines OH-I trigger | MTL 30yr, ALS 9yr, Gen set/JCB/Dozer/SSL 8yr, etc. | 7 |
+| HRS-only asset handling | 90-day intervals for HRS equipment | Gen set, JCB, Dozer, SSL have no KMS tracking | 7 |
 
 ---
 
