@@ -1,7 +1,7 @@
 import logging
 from typing import List, Dict, Any, Optional
 from db.manager import db_manager
-from agents.column_mapper import ColumnMapperResponse, MappingEntry
+from agents.column_mapper import SchemaDiscoveryResponse, SchemaMapping
 
 logger = logging.getLogger("sidecar.mapping_manager")
 
@@ -10,16 +10,17 @@ class MappingManager:
     Manages the import mapping lifecycle, including human-in-the-loop review.
     """
 
-    def process_ai_response(self, response: ColumnMapperResponse) -> Dict[str, Any]:
+    def process_ai_response(self, response: SchemaDiscoveryResponse) -> Dict[str, Any]:
         """
-        Takes the AI response and determines if manual review is needed.
+        Takes the AI schema discovery response and determines if manual review is needed.
         """
-        needs_review = any(m.needs_review for m in response.mappings)
+        needs_review = any(s.needs_review for s in response.column_mappings)
         
         return {
-            "mappings": [m.dict() for m in response.mappings],
+            "column_mappings": [s.model_dump() for s in response.column_mappings],
             "status": "AWAITING_REVIEW" if needs_review else "READY",
-            "needs_review": needs_review
+            "needs_review": needs_review,
+            "sheet_name": response.sheet_name
         }
 
     def save_confirmed_mappings(self, mappings: List[Dict[str, Any]]):

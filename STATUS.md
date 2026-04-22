@@ -10,16 +10,17 @@
 | **Active Phase** | Phase 7 — Integration & Distribution |
 | **Phase Status** | 🔄 IN PROGRESS |
 | **Last Updated** | 2026-04-22 |
-| **Last Session Summary** | COMPLETE AI-driven schema discovery pipeline:
-- Updated lancedb_seed.json with 45+ patterns (BA NO, ENG OIL, TM-I DONE, etc.)
-- Added fluid_profiles table to schema.sql
-- Rewrote column_mapper.py with AI schema discovery (6 categories + fluid types)
-- Rewrote excel_engine.py with openpyxl merged header extraction
-- Rewrote import_router.py with dynamic pipeline (no hardcoded FIELD_TO_COLUMNS)
-- Updated lifecycle.py with equipment type rules (MTL 30yr, ALS 9yr, Gen set/JCB/Dozer/SSL 8yr)
-- Updated schedule_engine.py for HRS-only assets (90-day intervals)
-- Ready for testing with 161_f-164_f workbooks |
-| **Next Action** | Test import with production workbooks: 161_f, 162_f, 163_f, 164_f |
+| **Last Session Summary** | **MULTI-AGENT SYSTEM IMPLEMENTED**:
+- **AGT-00 Orchestrator**: Routes headers to specialists using 10 regex patterns
+- **AGT-01 Identity**: BA numbers, asset names, serial numbers
+- **AGT-02 Usage**: Hours run, KM run
+- **AGT-03 Date**: Commission dates, maintenance due dates
+- **AGT-04 Fluid**: Engine oil, coolant with fluid types
+- **AGT-05 Validator**: Merges results, auto-ignores ambiguous
+- **PARALLEL PROCESSING**: 4 agents run simultaneously on 4 CPU cores
+- **Expected Speedup**: 200s → 20-30s per sheet (10× faster)
+- **Fallback**: Batch mode if multi-agent fails |
+| **Next Action** | Restart server, test 161_f import — verify 30-60 second completion |
 | **Blockers** | None |
 
 ---

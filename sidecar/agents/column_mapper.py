@@ -14,6 +14,9 @@ from llama_cpp import Llama
 from db.manager import db_manager
 from db.vector_store import vector_store
 
+# Multi-Agent System Import
+from .multi_agent_mapper import discover_schema_multi_agent
+
 logger = logging.getLogger("sidecar.agents.column_mapper")
 
 
@@ -53,7 +56,7 @@ class SchemaMapping(BaseModel):
     col_index: int = Field(description="0-based column index in the Excel sheet")
     header: str = Field(description="The concatenated header string from the workbook")
     category: str = Field(description="Semantic category: IDENTITY/USAGE/DATE/FLUID/CONDITIONING/IGNORE")
-    maps_to: str = Field(description="Target field name (e.g., ba_number, fluid_capacity)")
+    maps_to: Optional[str] = Field(description="Target field name (e.g., ba_number, fluid_capacity). Null for IGNORE category.")
     fluid_type: Optional[str] = Field(description="For FLUID category: ENG_OIL, TXN_OIL, etc. Null otherwise")
     confidence: float = Field(description="Confidence score between 0.0 and 1.0")
     needs_review: bool = Field(default=False, description="True if confidence < 0.75")
@@ -62,23 +65,26 @@ class SchemaMapping(BaseModel):
 class SchemaDiscoveryResponse(BaseModel):
     """Full schema discovery response for all columns in a sheet."""
     sheet_name: str = Field(description="Name of the Excel sheet")
-    schema: List[SchemaMapping]
+    column_mappings: List[SchemaMapping] = Field(alias="schema")
     
     def get_identity_columns(self) -> List[SchemaMapping]:
         """Get all IDENTITY category columns."""
-        return [s for s in self.schema if s.category == "IDENTITY"]
+        return [s for s in self.column_mappings if s.category == "IDENTITY"]
     
     def get_fluid_columns(self) -> List[SchemaMapping]:
         """Get all FLUID category columns."""
-        return [s for s in self.schema if s.category == "FLUID"]
+        return [s for s in self.column_mappings if s.category == "FLUID"]
     
     def get_date_columns(self) -> List[SchemaMapping]:
         """Get all DATE category columns."""
-        return [s for s in self.schema if s.category == "DATE"]
+        return [s for s in self.column_mappings if s.category == "DATE"]
     
     def get_columns_by_fluid_type(self, fluid_type: str) -> List[SchemaMapping]:
         """Get FLUID columns for a specific fluid type."""
-        return [s for s in self.schema if s.category == "FLUID" and s.fluid_type == fluid_type]
+        return [s for s in self.column_mappings if s.category == "FLUID" and s.fluid_type == fluid_type]
+    
+    class Config:
+        populate_by_name = True
 
 
 # ── Singleton LLM ─────────────────────────────────────────────────────────────
@@ -94,9 +100,22 @@ def get_llm() -> Llama:
         if tauri_res:
             model_path = str(Path(tauri_res) / "resources" / "models" / "phi-3.5-mini.Q4_K_M.gguf")
         else:
-            # Dev mode: look in project root/models
+            # Dev mode: check multiple possible locations
             project_root = Path(__file__).parent.parent.parent
-            model_path = str(project_root / "models" / "phi-3.5-mini.Q4_K_M.gguf")
+            sidecar_root = Path(__file__).parent.parent
+            
+            # Try sidecar/models first (where it actually is)
+            model_path_sidecar = sidecar_root / "models" / "phi-3.5-mini.Q4_K_M.gguf"
+            # Fallback to project root/models
+            model_path_project = project_root / "models" / "phi-3.5-mini.Q4_K_M.gguf"
+            
+            if model_path_sidecar.exists():
+                model_path = str(model_path_sidecar)
+            elif model_path_project.exists():
+                model_path = str(model_path_project)
+            else:
+                # Default to sidecar path for error message clarity
+                model_path = str(model_path_sidecar)
 
         n_threads = max(1, (os.cpu_count() or 2) // 2)
         logger.info(f"Initializing Llama model from {model_path} — n_threads={n_threads}, n_batch=512...")
@@ -121,11 +140,28 @@ def _strip_json_fences(text: str) -> str:
 
 
 def _extract_json_array(text: str) -> str:
-    """Extracts the first JSON array [...] from the text."""
-    match = re.search(r'\[.*\]', text, re.DOTALL)
-    if match:
-        return match.group(0)
-    raise ValueError(f"No JSON array in model output. Raw: {text[:400]}")
+    """Extracts the first JSON array [...] from the text using bracket matching."""
+    # Find the first '['
+    start = text.find('[')
+    if start == -1:
+        raise ValueError(f"No JSON array in model output. Raw: {text[:400]}")
+    
+    # Count brackets to find matching ']'
+    bracket_count = 0
+    end = start
+    for i, char in enumerate(text[start:], start=start):
+        if char == '[':
+            bracket_count += 1
+        elif char == ']':
+            bracket_count -= 1
+            if bracket_count == 0:
+                end = i
+                break
+    
+    if bracket_count != 0:
+        raise ValueError(f"Unmatched brackets in JSON array. Raw: {text[:400]}")
+    
+    return text[start:end+1]
 
 
 def _save_confirmed_schema(schema: List[SchemaMapping]):
@@ -165,7 +201,32 @@ class ColumnMapper:
     """
 
     def __init__(self, model_path: str = "models/phi-3.5-mini.Q4_K_M.gguf"):
-        self.model_path = model_path
+        self._model_path = model_path
+    
+    @property
+    def model_path(self) -> str:
+        """Resolve the actual model file path (checks multiple locations)."""
+        # If TAURI_RESOURCE_DIR is set, use that
+        tauri_res = os.environ.get("TAURI_RESOURCE_DIR")
+        if tauri_res:
+            path = Path(tauri_res) / "resources" / "models" / "phi-3.5-mini.Q4_K_M.gguf"
+            if path.exists():
+                return str(path)
+        
+        # Check sidecar/models first
+        sidecar_root = Path(__file__).parent.parent
+        sidecar_path = sidecar_root / "models" / "phi-3.5-mini.Q4_K_M.gguf"
+        if sidecar_path.exists():
+            return str(sidecar_path)
+        
+        # Fallback to project root
+        project_root = Path(__file__).parent.parent.parent
+        project_path = project_root / "models" / "phi-3.5-mini.Q4_K_M.gguf"
+        if project_path.exists():
+            return str(project_path)
+        
+        # Return default if not found
+        return str(sidecar_path)
 
     async def discover_schema(
         self, 
@@ -183,68 +244,99 @@ class ColumnMapper:
             SchemaDiscoveryResponse with categorized columns and fluid types
         """
         logger.info(f"Discovering schema for sheet '{sheet_name}' with {len(headers)} columns")
-
-        # ── Step 1: RAG candidates for all headers ───────────────────────────
-        rag_context = []
-        for idx, header in enumerate(headers):
-            # Check confirmed_mappings first (faster, no LLM needed for known cols)
-            conn = db_manager.connect()
-            cached = conn.execute(
-                "SELECT ui_field, data_type, confidence FROM confirmed_mappings WHERE workbook_col = ?",
-                (header,)
-            ).fetchone()
-            
-            cached_info = None
-            if cached:
-                c = dict(cached)
-                logger.debug(f"Cache hit for {header!r} → {c['ui_field']} ({c['confidence']:.2f})")
-                # Try to parse extra info from data_type JSON
-                try:
-                    cached_info = json.loads(c.get("data_type", "{}"))
-                except:
-                    cached_info = {}
-
-            matches = vector_store.search(header, limit=3)
-            rag_context.append({
-                "col_index": idx,
-                "header": header,
-                "cached": cached_info,
-                "top_3_matches": [
-                    {
-                        "ui_field":    m["ui_field"],
-                        "description": m["description"],
-                        "data_type":   m["data_type"],
-                    }
-                    for m in matches
-                ],
-            })
-
-        # ── Step 2: Build AI prompt for schema discovery ─────────────────────
-        context_lines = []
-        for ctx in rag_context:
-            col_idx = ctx["col_index"]
-            header = ctx["header"]
-            candidates = " | ".join(
-                f"{m['ui_field']}({m['data_type']})" for m in ctx["top_3_matches"]
+        
+        # ── Step 0: Check sheet-level cache (headers fingerprint) ─────────────
+        header_fingerprint = f"{sheet_name}:{hash(tuple(headers))}"
+        conn = db_manager.connect()
+        
+        # Ensure cache table exists (idempotent)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS sheet_schemas (
+                fingerprint TEXT PRIMARY KEY,
+                sheet_name TEXT NOT NULL,
+                schema_json TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-            context_lines.append(f'  [{col_idx}] "{header}" → candidates: {candidates}')
+        """)
+        
+        cached_schema = conn.execute(
+            "SELECT schema_json, created_at FROM sheet_schemas WHERE fingerprint = ?",
+            (header_fingerprint,)
+        ).fetchone()
+        
+        if cached_schema:
+            logger.info(f"Sheet cache HIT for '{sheet_name}' — skipping LLM entirely")
+            schema_list = json.loads(cached_schema["schema_json"])
+            mappings = [SchemaMapping(**s) for s in schema_list]
+            return SchemaDiscoveryResponse(sheet_name=sheet_name, column_mappings=mappings)
+        
+        # ── Step 1: Use Multi-Agent System for Fast Schema Discovery ─────────
+        # NEW: AGT-00 (Orchestrator) → AGT-01/02/03/04 (Specialists) → AGT-05 (Validator)
+        # Parallel processing with 10 regex patterns for 10×+ speedup
+        logger.info(f"[AGT-SYSTEM] Using multi-agent parallel processing for '{sheet_name}'")
+        
+        try:
+            llm = get_llm()
+            mapping_dicts = discover_schema_multi_agent(sheet_name, headers, llm)
+            
+            # Convert dicts to SchemaMapping objects
+            mappings = [SchemaMapping(**m) for m in mapping_dicts]
+            
+            # Cache the discovered schema
+            schema_json = json.dumps([m.model_dump() for m in mappings])
+            conn.execute(
+                """INSERT OR REPLACE INTO sheet_schemas (fingerprint, sheet_name, schema_json)
+                   VALUES (?, ?, ?)""",
+                (header_fingerprint, sheet_name, schema_json)
+            )
+            conn.commit()
+            
+            return SchemaDiscoveryResponse(sheet_name=sheet_name, column_mappings=mappings)
+            
+        except Exception as e:
+            logger.error(f"Multi-agent failed: {e}, falling back to batch mode")
+            # Fallback to original batch mode if multi-agent fails
+            pass
+        
+        # ── FALLBACK: Original batch-based processing ────────────────────────
+        BATCH_SIZE = 15
+        
+        if len(headers) <= BATCH_SIZE:
+            header_lines = [f'  [{idx}] "{h}"' for idx, h in enumerate(headers)]
+            header_block = "\n".join(header_lines)
+            batches = [(0, headers, header_block)]
+        else:
+            batches = []
+            for batch_start in range(0, len(headers), BATCH_SIZE):
+                batch_end = min(batch_start + BATCH_SIZE, len(headers))
+                batch_headers = headers[batch_start:batch_end]
+                header_lines = [f'  [{batch_start + idx}] "{h}"' for idx, h in enumerate(batch_headers)]
+                header_block = "\n".join(header_lines)
+                batches.append((batch_start, batch_headers, header_block))
+            logger.info(f"Split {len(headers)} columns into {len(batches)} batches of {BATCH_SIZE}")
 
-        context_block = "\n".join(context_lines)
+        all_results = []
+        t0_global = time.perf_counter()
+        for batch_idx, (batch_start, batch_headers, header_block) in enumerate(batches):
+            prompt = f"""You are AGT-01 ColumnMapper. Analyze Excel column headers and classify each into semantic categories.
 
-        prompt = f"""You are AGT-01 ColumnMapper. Analyze Excel column headers and classify each into semantic categories.
-
-Sheet name: {sheet_name}
+Sheet name: {sheet_name} (batch {batch_idx + 1}/{len(batches)})
 
 Columns to analyze:
-{context_block}
+{header_block}
 
-Categories (classify each column):
-- IDENTITY: ba_number, asset_name, serial_number, asset_group
-- USAGE: kms_road, kms_towing, hrs_run, kms_previous_month, kms_current_month, fuel_rate
-- DATE: date_of_commission, tm1_done, tm1_due, tm2_done, tm2_due, oh1_done, oh1_due, oh2_done, oh2_due, service_life_vintage, discard_vintage_years, discard_kms_limit
+Use your knowledge of military vehicle maintenance records to identify:
+- Asset identifiers (BA numbers, serial numbers)
+- Usage metrics (hours, kilometers)
+- Maintenance dates and intervals
+- Fluid service requirements
+- Component conditioning data
+- IDENTITY: ba_number (asset ID like "BA NO"), asset_name (equipment name like "MAKE & TYPE", "TYPE", "EQUIPMENT"), serial_number, asset_group (vehicle category like "Gen set", "JCB", "Dozer")
+- USAGE: kms_road, kms_towing, hrs_run, hrs_run_monthly, kms_previous_month, kms_current_month, fuel_rate
+- DATE: date_of_commission, date_of_release, tm1_done, tm1_due, tm2_done, tm2_due, oh1_done, oh1_due, oh2_done, oh2_due, service_life_vintage, discard_vintage_years, discard_kms_limit
 - FLUID: fluid_capacity, fluid_top_up, fluid_grade, fluid_last_change, fluid_periodicity
 - CONDITIONING: battery_last_change, battery_life, tyre_rotation, tyre_condition, tyre_mileage
-- IGNORE: ser_no, remarks, misc (skip summary rows and totals)
+- IGNORE: ser_no, remarks, misc, page_totals (skip summary rows, totals, page numbers)
 
 Fluid Types (for FLUID category columns only):
 - ENG_OIL: Engine oil, crankcase oil
@@ -284,33 +376,33 @@ Rules:
 
 JSON array:"""
 
-        # ── Step 3: Single LLM inference call ───────────────────────────────
-        llm = get_llm()
-        t0 = time.perf_counter()
-        raw_response = llm.create_chat_completion(
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.1,
-            max_tokens=4096,  # Larger for more columns
-        )
-        elapsed = time.perf_counter() - t0
+            # ── Step 3: Single LLM inference call per batch ─────────────────────
+            llm = get_llm()
+            t0 = time.perf_counter()
+            raw_response = llm.create_chat_completion(
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                max_tokens=2048,  # Smaller - only 15 columns max per batch
+            )
+            batch_elapsed = time.perf_counter() - t0
+            logger.info(f"Batch {batch_idx + 1}/{len(batches)} complete in {batch_elapsed:.2f}s")
 
-        logger.info(
-            f"Schema discovery completed in {elapsed:.2f}s for {len(headers)} columns"
-        )
-
-        # ── Step 4: Parse output ─────────────────────────────────────────────
-        raw_text = raw_response["choices"][0]["message"]["content"]
-        logger.info(f"Raw LLM output (first 500 chars): {raw_text[:500]}")
-
-        cleaned = _strip_json_fences(raw_text)
-        json_array_str = _extract_json_array(cleaned)
-        raw_list = json.loads(json_array_str)
+            # ── Step 4: Parse output ─────────────────────────────────────────────
+            raw_text = raw_response["choices"][0]["message"]["content"]
+            cleaned = _strip_json_fences(raw_text)
+            json_array_str = _extract_json_array(cleaned)
+            batch_results = json.loads(json_array_str)
+            all_results.extend(batch_results)
+        
+        # Total time for all batches
+        total_elapsed = time.perf_counter() - t0_global
+        logger.info(f"All batches complete: {len(all_results)} mappings in {total_elapsed:.2f}s")
 
         # Build schema mappings
         schema: List[SchemaMapping] = []
         seen_indices: set = set()
         
-        for item in raw_list:
+        for item in all_results:
             idx = item.get("col_index", -1)
             if idx in seen_indices or idx < 0 or idx >= len(headers):
                 logger.warning(f"Invalid or duplicate col_index {idx} — skipping")
@@ -333,11 +425,16 @@ JSON array:"""
             confidence = item.get("confidence", 0.0)
             needs_review = confidence < 0.75
 
+            # Handle null maps_to for IGNORE columns
+            maps_to = item.get("maps_to")
+            if maps_to is None and category != "IGNORE":
+                maps_to = "unknown"
+            
             schema.append(SchemaMapping(
                 col_index=idx,
                 header=headers[idx],
                 category=category,
-                maps_to=item.get("maps_to", "unknown"),
+                maps_to=maps_to,  # Can be null for IGNORE
                 fluid_type=fluid_type,
                 confidence=confidence,
                 needs_review=needs_review,
@@ -351,7 +448,7 @@ JSON array:"""
                     col_index=idx,
                     header=header,
                     category="IGNORE",
-                    maps_to="ignore",
+                    maps_to=None,  # Null for ignored columns
                     fluid_type=None,
                     confidence=0.0,
                     needs_review=True,
@@ -360,7 +457,20 @@ JSON array:"""
         # Sort by col_index
         schema.sort(key=lambda x: x.col_index)
 
-        response = SchemaDiscoveryResponse(sheet_name=sheet_name, schema=schema)
+        response = SchemaDiscoveryResponse(sheet_name=sheet_name, column_mappings=schema)
+        
+        # ── Step 4b: Cache the discovered schema ─────────────────────────────
+        try:
+            schema_json = json.dumps([s.model_dump() for s in schema])
+            conn.execute(
+                """INSERT OR REPLACE INTO sheet_schemas 
+                   (fingerprint, sheet_name, schema_json) VALUES (?, ?, ?)""",
+                (header_fingerprint, sheet_name, schema_json)
+            )
+            conn.commit()
+            logger.info(f"Cached schema for '{sheet_name}' — future imports will skip LLM")
+        except Exception as e:
+            logger.warning(f"Failed to cache schema: {e}")
 
         # ── Step 5: Audit log ────────────────────────────────────────────────
         db_manager.log_agent_action(

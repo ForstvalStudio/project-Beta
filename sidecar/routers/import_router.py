@@ -2,7 +2,9 @@
 Import Router with AI-driven Schema Discovery Pipeline.
 No hardcoded FIELD_TO_COLUMNS — all column mappings discovered dynamically at runtime.
 """
+import asyncio
 import logging
+import time
 import uuid
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, HTTPException, UploadFile, File
@@ -23,10 +25,9 @@ router = APIRouter(prefix="/import", tags=["Import"])
 # ── Request / Response models ────────────────────────────────────────────────
 
 class SchemaConfirmRequest(BaseModel):
-    """Request to confirm discovered schema with optional corrections."""
-    file_path: str
-    sheet_schemas: Dict[str, List[Dict[str, Any]]]  # sheet_name -> list of column schemas
-    skip_sheets: List[str] = []  # Sheets to skip
+    """Request to confirm import with file path and approved schemas."""
+    file_path: str  # Path to uploaded file
+    sheet_schemas: Dict[str, List[Dict[str, Any]]]  # sheet_name -> list of SchemaMapping dicts
 
 
 class ImportResult(BaseModel):
@@ -350,15 +351,27 @@ async def upload_workbook(file: UploadFile = File(...)) -> UploadResponse:
     3. Run AI schema discovery on each sheet
     4. Return discovered schema for human review
     """
+    import os
+    import tempfile
+    
+    if not file or not file.filename:
+        raise HTTPException(status_code=400, detail="No file uploaded")
+    
     import_id = f"IMP-{uuid.uuid4().hex[:8].upper()}"
     
-    # Save file to temp location
-    temp_path = f"/tmp/{import_id}_{file.filename}"
-    with open(temp_path, "wb") as f:
-        content = await file.read()
-        f.write(content)
+    # Save file to temp location (cross-platform)
+    temp_dir = tempfile.gettempdir()
+    safe_filename = file.filename.replace(" ", "_").replace("/", "_").replace("\\", "_")
+    temp_path = os.path.join(temp_dir, f"{import_id}_{safe_filename}")
     
-    logger.info(f"[{import_id}] Uploaded file saved to {temp_path}")
+    try:
+        content = await file.read()
+        with open(temp_path, "wb") as f:
+            f.write(content)
+        logger.info(f"[{import_id}] Uploaded file saved to {temp_path} ({len(content)} bytes)")
+    except Exception as e:
+        logger.error(f"[{import_id}] Failed to save uploaded file: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
     
     try:
         # Extract headers from all sheets
@@ -367,35 +380,53 @@ async def upload_workbook(file: UploadFile = File(...)) -> UploadResponse:
         sheets_data = {}
         needs_review = False
         
-        for sheet_name, headers in sheet_headers.items():
-            # Skip empty sheets
+        async def process_one_sheet(sheet_name: str, headers: list) -> tuple:
+            """Process a single sheet - runs in parallel with others."""
             if not headers or len(headers) < 2:
-                continue
+                return (sheet_name, None)
             
-            # Run AI schema discovery
-            schema_response = await column_mapper.discover_schema(sheet_name, headers)
-            
-            # Check if any columns need review
-            if any(s.needs_review for s in schema_response.schema):
-                needs_review = True
-            
-            # Get preview rows (first 3)
-            preview_rows = []
             try:
-                schema_dicts = [s.model_dump() for s in schema_response.schema]
-                rows = excel_engine.extract_sheet_data(temp_path, sheet_name, schema_dicts)
-                preview_rows = rows[:3]
+                logger.info(f"[{import_id}] Starting schema discovery for '{sheet_name}' ({len(headers)} columns)")
+                t0 = time.perf_counter()
+                
+                # Run AI schema discovery
+                schema_response = await column_mapper.discover_schema(sheet_name, headers)
+                
+                # Get preview rows (first 3)
+                preview_rows = []
+                try:
+                    schema_dicts = [s.model_dump() for s in schema_response.column_mappings]
+                    rows = excel_engine.extract_sheet_data(temp_path, sheet_name, schema_dicts)
+                    preview_rows = rows[:3]
+                except Exception as e:
+                    logger.warning(f"Could not extract preview for {sheet_name}: {e}")
+                
+                elapsed = time.perf_counter() - t0
+                logger.info(f"[{import_id}] Sheet '{sheet_name}' complete in {elapsed:.1f}s")
+                
+                return (sheet_name, {
+                    "headers": headers,
+                    "schema": [s.model_dump() for s in schema_response.column_mappings],
+                    "preview_rows": preview_rows,
+                    "column_count": len(headers),
+                    "identity_columns": [s.model_dump() for s in schema_response.get_identity_columns()],
+                    "fluid_columns": [s.model_dump() for s in schema_response.get_fluid_columns()],
+                    "needs_review": any(s.needs_review for s in schema_response.column_mappings),
+                })
             except Exception as e:
-                logger.warning(f"Could not extract preview for {sheet_name}: {e}")
-            
-            sheets_data[sheet_name] = {
-                "headers": headers,
-                "schema": [s.model_dump() for s in schema_response.schema],
-                "preview_rows": preview_rows,
-                "column_count": len(headers),
-                "identity_columns": [s.model_dump() for s in schema_response.get_identity_columns()],
-                "fluid_columns": [s.model_dump() for s in schema_response.get_fluid_columns()],
-            }
+                logger.error(f"[{import_id}] Failed to process sheet '{sheet_name}': {e}")
+                return (sheet_name, None)
+        
+        # Process all sheets in PARALLEL (major speedup for multi-sheet workbooks)
+        sheet_tasks = [process_one_sheet(name, hdrs) for name, hdrs in sheet_headers.items()]
+        results = await asyncio.gather(*sheet_tasks)
+        
+        # Collect results
+        for sheet_name, sheet_data in results:
+            if sheet_data:
+                sheets_data[sheet_name] = sheet_data
+                if sheet_data.get("needs_review"):
+                    needs_review = True
         
         logger.info(f"[{import_id}] Discovered schema for {len(sheets_data)} sheets")
         
@@ -414,11 +445,11 @@ async def upload_workbook(file: UploadFile = File(...)) -> UploadResponse:
 @router.post("/{import_id}/confirm", response_model=ImportResponse)
 async def confirm_import(import_id: str, request: SchemaConfirmRequest) -> ImportResponse:
     """
-    STEP 2 — Confirm and import with approved schema.
+    STEP 2 — Confirm and import with AI-discovered and user-approved schema.
     
-    Accepts corrected schema from the frontend and performs the actual import.
+    Backend re-reads the workbook file using confirmed schema mappings.
     """
-    logger.info(f"[{import_id}] Confirming import with {len(request.sheet_schemas)} sheets")
+    logger.info(f"[{import_id}] Confirming import for file: {request.file_path}")
     
     conn = db_manager.connect()
     results = []
@@ -427,14 +458,10 @@ async def confirm_import(import_id: str, request: SchemaConfirmRequest) -> Impor
     all_errors = []
     
     for sheet_name, schema_list in request.sheet_schemas.items():
-        if sheet_name in request.skip_sheets:
-            logger.info(f"[{import_id}] Skipping sheet '{sheet_name}' as requested")
-            continue
-        
         # Convert dict list to SchemaMapping objects
         schema = [SchemaMapping(**s) for s in schema_list]
         
-        # Import this sheet
+        # Import this sheet by re-reading the file
         result = await _import_sheet(request.file_path, sheet_name, schema, conn)
         results.append(result)
         total_imported += result.imported

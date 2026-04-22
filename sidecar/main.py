@@ -240,6 +240,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
             elif msg_type == "analyze_mapping":
                 headers = payload.get("headers", [])
+                sheet_name = payload.get("sheet_name", "Sheet1")
                 if not headers:
                     await websocket.send_json({"type": "error", "message": "No headers provided"})
                     continue
@@ -249,24 +250,28 @@ async def websocket_endpoint(websocket: WebSocket):
                 try:
                     model_path = column_mapper.model_path
                     if os.path.exists(model_path):
-                        ai_response = await column_mapper.map_columns(headers)
+                        ai_response = await column_mapper.discover_schema(sheet_name, headers)
                     else:
                         logger.warning(f"Model not found at {model_path}. Using mock response.")
-                        from agents.column_mapper import ColumnMapperResponse, MappingEntry
-                        mock_mappings = [
-                            MappingEntry(
-                                workbook_col=h,
-                                ui_field="ba_number" if "ba" in h.lower() or "reg" in h.lower() else "serial_number",
+                        from agents.column_mapper import SchemaDiscoveryResponse, SchemaMapping
+                        mock_schema = [
+                            SchemaMapping(
+                                col_index=i,
+                                header=h,
+                                category="IDENTITY" if any(k in h.lower() for k in ["ba", "reg", "no", "number"]) else "USAGE",
+                                maps_to="ba_number" if any(k in h.lower() for k in ["ba", "reg", "no"]) else "kms_road",
+                                fluid_type=None,
                                 confidence=0.85,
-                                data_type="string",
                                 needs_review=False
                             )
-                            for h in headers
+                            for i, h in enumerate(headers)
                         ]
-                        ai_response = ColumnMapperResponse(mappings=mock_mappings)
+                        ai_response = SchemaDiscoveryResponse(sheet_name=sheet_name, column_mappings=mock_schema)
 
                     result = {
-                        "mappings": [m.model_dump() for m in ai_response.mappings]
+                        "mappings": [s.model_dump() for s in ai_response.column_mappings],
+                        "sheet_name": ai_response.sheet_name,
+                        "needs_review": any(s.needs_review for s in ai_response.column_mappings)
                     }
                     await websocket.send_json({
                         "type": "mapping_suggestions",

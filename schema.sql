@@ -127,6 +127,15 @@ CREATE TABLE IF NOT EXISTS confirmed_mappings (
     last_confirmed TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Table: sheet_schemas
+-- Caches AI-discovered schemas for sheet+header combinations (major speedup)
+CREATE TABLE IF NOT EXISTS sheet_schemas (
+    fingerprint TEXT PRIMARY KEY,
+    sheet_name TEXT NOT NULL,
+    schema_json TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Table: agent_audit_log
 CREATE TABLE IF NOT EXISTS agent_audit_log (
     log_id INTEGER PRIMARY KEY AUTOINCREMENT,
