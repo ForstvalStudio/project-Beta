@@ -17,6 +17,9 @@ from db.vector_store import vector_store
 # Multi-Agent System Import
 from .multi_agent_mapper import discover_schema_multi_agent
 
+# Code Generation System Import (NEW: AGT-CODE)
+from .code_gen_mapper import CodeGenMapper
+
 logger = logging.getLogger("sidecar.agents.column_mapper")
 
 
@@ -164,6 +167,22 @@ def _extract_json_array(text: str) -> str:
     return text[start:end+1]
 
 
+def _create_fallback_batch_results(batch_headers: List[str], batch_start: int) -> List[dict]:
+    """Create fallback IGNORE results when batch processing fails after retries."""
+    fallback_results = []
+    for i, header in enumerate(batch_headers):
+        fallback_results.append({
+            "col_index": batch_start + i,
+            "header": header,
+            "category": "IGNORE",
+            "maps_to": None,
+            "fluid_type": None,
+            "confidence": 0.0,
+            "needs_review": True
+        })
+    return fallback_results
+
+
 def _save_confirmed_schema(schema: List[SchemaMapping]):
     """
     Saves confirmed schema mappings back to SQLite confirmed_mappings table.
@@ -270,14 +289,15 @@ class ColumnMapper:
             mappings = [SchemaMapping(**s) for s in schema_list]
             return SchemaDiscoveryResponse(sheet_name=sheet_name, column_mappings=mappings)
         
-        # ── Step 1: Use Multi-Agent System for Fast Schema Discovery ─────────
-        # NEW: AGT-00 (Orchestrator) → AGT-01/02/03/04 (Specialists) → AGT-05 (Validator)
-        # Parallel processing with 10 regex patterns for 10×+ speedup
-        logger.info(f"[AGT-SYSTEM] Using multi-agent parallel processing for '{sheet_name}'")
+        # ── Step 1: Use Code Generation for Fast Schema Discovery ────────────
+        # NEW: AGT-CODE — LLM writes Python classifier → executes at native speed
+        # ~12s first sheet, ~3s cached sheets (vs 101s multi-agent)
+        logger.info(f"[AGT-CODE] Using code generation schema discovery for '{sheet_name}'")
         
         try:
             llm = get_llm()
-            mapping_dicts = discover_schema_multi_agent(sheet_name, headers, llm)
+            code_mapper = CodeGenMapper(llm, conn)
+            mapping_dicts = code_mapper.discover_schema(sheet_name, headers)
             
             # Convert dicts to SchemaMapping objects
             mappings = [SchemaMapping(**m) for m in mapping_dicts]
@@ -294,12 +314,12 @@ class ColumnMapper:
             return SchemaDiscoveryResponse(sheet_name=sheet_name, column_mappings=mappings)
             
         except Exception as e:
-            logger.error(f"Multi-agent failed: {e}, falling back to batch mode")
-            # Fallback to original batch mode if multi-agent fails
+            logger.error(f"Code generation failed: {e}, falling back to batch mode")
+            # Fallback to original batch mode if code gen fails
             pass
         
         # ── FALLBACK: Original batch-based processing ────────────────────────
-        BATCH_SIZE = 15
+        BATCH_SIZE = 5  # Reduced from 15 to prevent JSON truncation and improve speed
         
         if len(headers) <= BATCH_SIZE:
             header_lines = [f'  [{idx}] "{h}"' for idx, h in enumerate(headers)]
@@ -378,21 +398,56 @@ JSON array:"""
 
             # ── Step 3: Single LLM inference call per batch ─────────────────────
             llm = get_llm()
-            t0 = time.perf_counter()
-            raw_response = llm.create_chat_completion(
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
-                max_tokens=2048,  # Smaller - only 15 columns max per batch
-            )
-            batch_elapsed = time.perf_counter() - t0
-            logger.info(f"Batch {batch_idx + 1}/{len(batches)} complete in {batch_elapsed:.2f}s")
-
-            # ── Step 4: Parse output ─────────────────────────────────────────────
-            raw_text = raw_response["choices"][0]["message"]["content"]
-            cleaned = _strip_json_fences(raw_text)
-            json_array_str = _extract_json_array(cleaned)
-            batch_results = json.loads(json_array_str)
-            all_results.extend(batch_results)
+            batch_results = None
+            max_retries = 3
+            
+            for attempt in range(max_retries):
+                try:
+                    t0 = time.perf_counter()
+                    raw_response = llm.create_chat_completion(
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0.1,
+                        max_tokens=1024,  # Reduced for 5 columns max per batch
+                    )
+                    batch_elapsed = time.perf_counter() - t0
+                    
+                    # ── Step 4: Parse output with truncation handling ──────────────────
+                    raw_text = raw_response["choices"][0]["message"]["content"]
+                    cleaned = _strip_json_fences(raw_text)
+                    json_array_str = _extract_json_array(cleaned)
+                    batch_results = json.loads(json_array_str)
+                    
+                    logger.info(f"Batch {batch_idx + 1}/{len(batches)} complete in {batch_elapsed:.2f}s (attempt {attempt + 1})")
+                    break  # Success, exit retry loop
+                    
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Batch {batch_idx + 1} JSON parse error (attempt {attempt + 1}/{max_retries}): {e}")
+                    
+                    # Try to salvage partial JSON if truncated
+                    try:
+                        # Find last complete object
+                        last_bracket = json_array_str.rfind('}')
+                        if last_bracket > 0:
+                            partial = json_array_str[:last_bracket + 1]
+                            # Close array if needed
+                            if not partial.rstrip().endswith(']'):
+                                partial += ']'
+                            batch_results = json.loads(partial)
+                            logger.info(f"Batch {batch_idx + 1} recovered partial JSON with {len(batch_results)} results")
+                            break
+                    except Exception:
+                        pass  # Partial recovery failed
+                    
+                    if attempt < max_retries - 1:
+                        logger.info(f"Retrying batch {batch_idx + 1}...")
+                        time.sleep(1)  # Brief delay before retry
+                    else:
+                        logger.error(f"Batch {batch_idx + 1} failed after {max_retries} attempts")
+                        # Create fallback results for this batch
+                        batch_results = _create_fallback_batch_results(batch_headers, batch_start)
+                        
+            if batch_results:
+                all_results.extend(batch_results)
         
         # Total time for all batches
         total_elapsed = time.perf_counter() - t0_global

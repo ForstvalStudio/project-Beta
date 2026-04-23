@@ -10,16 +10,14 @@
 | **Active Phase** | Phase 7 — Integration & Distribution |
 | **Phase Status** | 🔄 IN PROGRESS |
 | **Last Updated** | 2026-04-22 |
-| **Last Session Summary** | **MULTI-AGENT SYSTEM IMPLEMENTED**:
-- **AGT-00 Orchestrator**: Routes headers to specialists using 10 regex patterns
-- **AGT-01 Identity**: BA numbers, asset names, serial numbers
-- **AGT-02 Usage**: Hours run, KM run
-- **AGT-03 Date**: Commission dates, maintenance due dates
-- **AGT-04 Fluid**: Engine oil, coolant with fluid types
-- **AGT-05 Validator**: Merges results, auto-ignores ambiguous
-- **PARALLEL PROCESSING**: 4 agents run simultaneously on 4 CPU cores
-- **Expected Speedup**: 200s → 20-30s per sheet (10× faster)
-- **Fallback**: Batch mode if multi-agent fails |
+| **Last Session Summary** | **CODE GENERATION SYSTEM IMPLEMENTED (AGT-CODE)**:
+- **AGT-CODE**: LLM writes Python classifier function from sample headers
+- **EXECUTE**: Runs generated Python code at native speed (0.1ms per header)
+- **CACHE**: Stores generated classifiers by header fingerprint
+- **FALLBACK**: LLM only for unknown headers (0-5 headers, not 40+)
+- **Expected Speedup**: 101s → 12s first sheet, 3s cached sheets
+- **Pattern Recognition**: BA NO, KM RUN, HRS RUN, ENG OIL, etc.
+- **Fallback**: Batch mode if code gen fails |
 | **Next Action** | Restart server, test 161_f import — verify 30-60 second completion |
 | **Blockers** | None |
 

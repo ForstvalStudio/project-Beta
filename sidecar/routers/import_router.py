@@ -89,8 +89,28 @@ async def _import_sheet(
 ) -> ImportResult:
     """
     Import a single sheet using the confirmed AI-discovered schema.
+    Converts Excel to CSV first for cleaner data extraction.
     """
     logger.info(f"Importing sheet '{sheet_name}' with {len(schema)} columns")
+    
+    # Convert Excel to CSV first
+    try:
+        csv_path, _, _ = excel_engine.convert_sheet_to_csv(file_path, sheet_name)
+        if not csv_path:
+            return ImportResult(
+                sheet_name=sheet_name,
+                imported=0,
+                skipped=0,
+                errors=[f"Failed to convert sheet '{sheet_name}' to CSV"]
+            )
+    except Exception as e:
+        logger.error(f"Failed to convert sheet to CSV: {e}")
+        return ImportResult(
+            sheet_name=sheet_name,
+            imported=0,
+            skipped=0,
+            errors=[f"CSV conversion failed: {str(e)}"]
+        )
     
     imported = 0
     skipped = 0
@@ -99,9 +119,18 @@ async def _import_sheet(
     # Convert schema to dict for excel_engine
     schema_dicts = [s.model_dump() for s in schema]
     
-    # Extract data rows
-    rows = excel_engine.extract_sheet_data(file_path, sheet_name, schema_dicts)
-    logger.info(f"Sheet '{sheet_name}': {len(rows)} data rows extracted")
+    # Extract data rows from CSV
+    try:
+        rows = excel_engine.extract_csv_data(csv_path, schema_dicts)
+        logger.info(f"Sheet '{sheet_name}': {len(rows)} data rows extracted from CSV")
+    except Exception as e:
+        logger.error(f"CSV extraction failed: {e}")
+        return ImportResult(
+            sheet_name=sheet_name,
+            imported=0,
+            skipped=0,
+            errors=[f"Data extraction failed: {str(e)}"]
+        )
     
     if not rows:
         return ImportResult(
@@ -128,7 +157,10 @@ async def _import_sheet(
         try:
             # ── Extract identity fields ───────────────────────────────────────
             ba_number = row_data.get("ba_number")
+            logger.info(f"[IMPORT] Row {row_idx}: ba_number='{ba_number}', keys={list(row_data.keys())[:10]}...")
+            
             if not ba_number:
+                logger.warning(f"[IMPORT] Row {row_idx}: SKIPPED - no ba_number. Raw data: {row_data}")
                 skipped += 1
                 continue
             
@@ -140,6 +172,7 @@ async def _import_sheet(
                 "SELECT ba_number FROM assets WHERE ba_number = ?", (ba_number,)
             ).fetchone()
             if existing:
+                logger.warning(f"[IMPORT] Row {row_idx}: SKIPPED - {ba_number} already exists")
                 errors.append(f"{ba_number}: already exists — skipped")
                 skipped += 1
                 continue
@@ -374,14 +407,33 @@ async def upload_workbook(file: UploadFile = File(...)) -> UploadResponse:
         raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
     
     try:
-        # Extract headers from all sheets
-        sheet_headers = excel_engine.read_workbook_sheets(temp_path)
+        # Step 1: Convert each sheet to CSV with flattened headers
+        from logic.excel_engine import excel_engine
+        import openpyxl
+        
+        wb = openpyxl.load_workbook(temp_path, read_only=True, data_only=True)
+        sheet_names = wb.sheetnames
+        wb.close()
+        
+        csv_conversions = {}
+        for sheet_name in sheet_names:
+            csv_path, flat_headers, data_start_row = excel_engine.convert_sheet_to_csv(
+                temp_path, sheet_name
+            )
+            if csv_path:
+                csv_conversions[sheet_name] = {
+                    "csv_path": csv_path,
+                    "headers": flat_headers,
+                    "data_start_row": data_start_row
+                }
+                logger.info(f"[{import_id}] CSV conversion for '{sheet_name}': {len(flat_headers)} headers, data starts at row {data_start_row}")
         
         sheets_data = {}
         needs_review = False
         
-        async def process_one_sheet(sheet_name: str, headers: list) -> tuple:
-            """Process a single sheet - runs in parallel with others."""
+        async def process_one_sheet(sheet_name: str, sheet_info: dict) -> tuple:
+            """Process a single sheet using CSV data."""
+            headers = sheet_info["headers"]
             if not headers or len(headers) < 2:
                 return (sheet_name, None)
             
@@ -389,15 +441,16 @@ async def upload_workbook(file: UploadFile = File(...)) -> UploadResponse:
                 logger.info(f"[{import_id}] Starting schema discovery for '{sheet_name}' ({len(headers)} columns)")
                 t0 = time.perf_counter()
                 
-                # Run AI schema discovery
+                # Run AI schema discovery on flattened headers
                 schema_response = await column_mapper.discover_schema(sheet_name, headers)
                 
-                # Get preview rows (first 3)
+                # Get preview rows from CSV
                 preview_rows = []
                 try:
                     schema_dicts = [s.model_dump() for s in schema_response.column_mappings]
-                    rows = excel_engine.extract_sheet_data(temp_path, sheet_name, schema_dicts)
+                    rows = excel_engine.extract_csv_data(sheet_info["csv_path"], schema_dicts)
                     preview_rows = rows[:3]
+                    logger.info(f"[{import_id}] Preview rows from '{sheet_name}': {len(preview_rows)} rows")
                 except Exception as e:
                     logger.warning(f"Could not extract preview for {sheet_name}: {e}")
                 
@@ -406,9 +459,11 @@ async def upload_workbook(file: UploadFile = File(...)) -> UploadResponse:
                 
                 return (sheet_name, {
                     "headers": headers,
+                    "csv_path": sheet_info["csv_path"],
                     "schema": [s.model_dump() for s in schema_response.column_mappings],
                     "preview_rows": preview_rows,
                     "column_count": len(headers),
+                    "data_start_row": sheet_info["data_start_row"],
                     "identity_columns": [s.model_dump() for s in schema_response.get_identity_columns()],
                     "fluid_columns": [s.model_dump() for s in schema_response.get_fluid_columns()],
                     "needs_review": any(s.needs_review for s in schema_response.column_mappings),
@@ -417,8 +472,8 @@ async def upload_workbook(file: UploadFile = File(...)) -> UploadResponse:
                 logger.error(f"[{import_id}] Failed to process sheet '{sheet_name}': {e}")
                 return (sheet_name, None)
         
-        # Process all sheets in PARALLEL (major speedup for multi-sheet workbooks)
-        sheet_tasks = [process_one_sheet(name, hdrs) for name, hdrs in sheet_headers.items()]
+        # Process all sheets in PARALLEL
+        sheet_tasks = [process_one_sheet(name, info) for name, info in csv_conversions.items()]
         results = await asyncio.gather(*sheet_tasks)
         
         # Collect results

@@ -153,6 +153,153 @@ class ExcelEngine:
             logger.error(f"Failed to read workbook {file_path}: {e}")
             raise
 
+    def convert_sheet_to_csv(
+        self,
+        file_path: str,
+        sheet_name: str,
+        output_path: Optional[str] = None
+    ) -> Tuple[str, List[str], int]:
+        """
+        Convert Excel sheet to clean CSV with flattened headers.
+        
+        Handles multi-row headers by combining them into single column names.
+        Auto-detects where data rows actually start (first row with numeric SER NO).
+        
+        Returns:
+            (csv_path, flattened_headers, data_start_row)
+        """
+        import openpyxl
+        import csv
+        
+        wb = openpyxl.load_workbook(file_path, data_only=True, read_only=False)
+        sheet = wb[sheet_name]
+        
+        # Read all rows into memory to analyze structure
+        all_rows = list(sheet.iter_rows(values_only=True))
+        if not all_rows:
+            wb.close()
+            return "", [], 0
+        
+        # Find data start row: first row where first cell is a number (SER NO)
+        data_start_row = 0
+        for i, row in enumerate(all_rows):
+            first_cell = row[0] if row else None
+            # Check if first cell is a number (asset serial number)
+            if first_cell is not None:
+                try:
+                    float(first_cell)  # If it's numeric, this is data
+                    data_start_row = i
+                    break
+                except (ValueError, TypeError):
+                    pass
+        
+        if data_start_row == 0:
+            # Couldn't find data start, assume standard 2 header rows
+            data_start_row = 2
+        
+        # Build flattened headers from all rows above data
+        header_rows = all_rows[:data_start_row]
+        num_cols = max(len(r) for r in all_rows) if all_rows else 0
+        
+        flattened_headers = []
+        for col_idx in range(num_cols):
+            parts = []
+            for row in header_rows:
+                cell_val = row[col_idx] if col_idx < len(row) else None
+                if cell_val is not None and str(cell_val).strip():
+                    parts.append(str(cell_val).strip())
+            # Combine header parts
+            if parts:
+                header = " ".join(parts)
+            else:
+                header = f"Column_{col_idx + 1}"
+            flattened_headers.append(header)
+        
+        # Generate output path if not provided
+        if output_path is None:
+            import tempfile
+            import os
+            temp_dir = tempfile.gettempdir()
+            base_name = os.path.splitext(os.path.basename(file_path))[0]
+            safe_sheet = sheet_name.replace(" ", "_").replace("&", "and")
+            output_path = os.path.join(temp_dir, f"{base_name}_{safe_sheet}.csv")
+        
+        # Write CSV with flattened headers and data rows
+        with open(output_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(flattened_headers)
+            for row in all_rows[data_start_row:]:
+                # Pad row to match header count
+                padded_row = list(row) + [''] * (num_cols - len(row))
+                writer.writerow(padded_row[:num_cols])
+        
+        wb.close()
+        logger.info(f"[CSV] Converted '{sheet_name}' to {output_path}: {len(flattened_headers)} cols, {len(all_rows) - data_start_row} data rows")
+        return output_path, flattened_headers, data_start_row
+
+    def extract_csv_data(
+        self,
+        csv_path: str,
+        schema: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Extract data rows from CSV using the AI-discovered schema.
+        
+        Args:
+            csv_path: Path to CSV file
+            schema: List of {col_index, header, category, maps_to, fluid_type}
+        
+        Returns:
+            List of asset data dicts
+        """
+        import csv
+        
+        logger.info(f"[CSV] Extracting data from {csv_path} with {len(schema)} mapped columns")
+        
+        # Build column index mapping
+        col_mapping = {s["col_index"]: s for s in schema if s.get("maps_to")}  # 0-based, only mapped columns
+        
+        # Find ba_number column for row validation
+        ba_number_col = None
+        for s in schema:
+            if s.get("maps_to") == "ba_number":
+                ba_number_col = s["col_index"]
+                break
+        
+        rows = []
+        with open(csv_path, 'r', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            header = next(reader)  # Skip header row
+            
+            for row_idx, row in enumerate(reader, start=2):
+                # Skip empty rows
+                if not row or not any(cell.strip() for cell in row):
+                    continue
+                
+                # Validate ba_number exists and is not a header repeat
+                if ba_number_col is not None:
+                    if ba_number_col >= len(row):
+                        continue
+                    ba_val = clean_value(row[ba_number_col])
+                    if ba_val is None or str(ba_val).strip() == "":
+                        continue
+                    ba_str = str(ba_val).upper()
+                    if "BA NO" in ba_str or "SER" in ba_str or "VEHICLE" in ba_str:
+                        continue
+                
+                # Build row data
+                row_data = {"_row_idx": row_idx}
+                for col_idx, col_schema in col_mapping.items():
+                    if col_idx < len(row):
+                        raw_val = row[col_idx]
+                        cleaned = clean_value(raw_val)
+                        row_data[col_schema["maps_to"]] = cleaned
+                
+                rows.append(row_data)
+        
+        logger.info(f"[CSV] Extracted {len(rows)} valid data rows")
+        return rows
+
     def extract_sheet_data(
         self, 
         file_path: str, 
